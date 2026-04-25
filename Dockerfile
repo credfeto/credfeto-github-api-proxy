@@ -2,7 +2,7 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY package*.json esbuild.config.mjs ./
 RUN npm ci --ignore-scripts
 
 COPY tsconfig.json ./
@@ -14,10 +14,8 @@ FROM node:20-alpine AS runtime
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci --omit=dev --ignore-scripts
-
-COPY --from=builder /app/dist ./dist
+# Only the single bundled file is needed — no node_modules
+COPY --from=builder /app/dist/index.js ./
 
 ENV PORT=3000
 ENV NODE_ENV=production
@@ -26,4 +24,4 @@ EXPOSE 3000
 
 USER node
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "index.js"]
