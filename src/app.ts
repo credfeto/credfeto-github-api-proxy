@@ -16,6 +16,11 @@ export function createApp(authConfig: AuthConfig): express.Application {
     express.raw({ type: "*/*", limit: "50mb" })
   );
 
+  // ── Health check (unauthenticated) ────────────────────────────────────────
+  app.get("/health", (_req: Request, res: Response) => {
+    res.status(200).json({ status: "ok" });
+  });
+
   // ── Authentication ─────────────────────────────────────────────────────────
   app.use(createAuthMiddleware(authConfig));
 
