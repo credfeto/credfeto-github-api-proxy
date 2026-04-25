@@ -158,6 +158,36 @@ Tests cover:
 
 ---
 
+## Docker
+
+Both the fake proxy token and the real GitHub PAT are passed as environment
+variables — never baked into the image.
+
+### Build and run
+
+```sh
+docker build -t github-api-proxy .
+
+docker run -p 3000:3000 \
+  -e PROXY_TOKEN=your-fake-agent-token \
+  -e GITHUB_PAT=ghp_your_real_github_pat \
+  github-api-proxy
+```
+
+### docker-compose
+
+Copy `.env.example` to `.env`, fill in the values, then:
+
+```sh
+docker compose up -d
+```
+
+The compose file reads `PROXY_TOKEN` and `GITHUB_PAT` from the `.env` file (or
+from the shell environment) and passes them into the container. The image
+itself contains neither value.
+
+---
+
 ## Security notes
 
 - **Never commit `.env`** — the `.gitignore` excludes it.
