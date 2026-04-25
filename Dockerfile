@@ -10,7 +10,7 @@ COPY src/ ./src/
 RUN npm run build
 
 
-FROM node:20-alpine AS runtime
+FROM gcr.io/distroless/nodejs20-debian12 AS runtime
 
 WORKDIR /app
 
@@ -22,6 +22,5 @@ ENV NODE_ENV=production
 
 EXPOSE 3000
 
-USER node
-
-CMD ["node", "index.js"]
+# distroless runs as nonroot (uid 65532) by default
+CMD ["index.js"]
