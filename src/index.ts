@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { createApp } from "./app.js";
+import { startServer, registerShutdownHandlers } from "./server.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const PROXY_TOKEN = process.env.PROXY_TOKEN;
@@ -16,9 +17,5 @@ if (!GITHUB_PAT) {
 }
 
 const app = createApp({ proxyToken: PROXY_TOKEN, githubPat: GITHUB_PAT });
-
-app.listen(PORT, () => {
-  console.log(`GitHub API proxy listening on http://localhost:${PORT}`);
-  console.log("Forwarding authenticated requests to https://api.github.com");
-  console.log("Commit/push operations are blocked.");
-});
+const handle = startServer(app, PORT);
+registerShutdownHandlers(handle);
