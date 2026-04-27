@@ -9,13 +9,18 @@ COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npm run build
 
+# ── Test stage — Docker build fails here if any test fails ──────────────────
+FROM builder AS tester
 
-FROM gcr.io/distroless/nodejs20-debian12 AS runtime
+RUN npm test
+
+
+FROM gcr.io/distroless/nodejs20-debian12:nonroot AS runtime
 
 WORKDIR /app
 
-# Only the single bundled file is needed — no node_modules
-COPY --from=builder /app/dist/index.js ./
+# Copy from tester (not builder directly) so tests must pass before the image is assembled
+COPY --from=tester /app/dist/index.js ./
 
 ENV PORT=3000
 ENV NODE_ENV=production
