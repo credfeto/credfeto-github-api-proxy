@@ -88,6 +88,34 @@ gh pr view 42 --repo owner/repo
 Destructive `gh` commands (creating commits via `gh api`) will be blocked by the
 proxy with a 403 response and a human-readable message.
 
+#### Why we strip a `/api/v3/` prefix from incoming URLs
+
+There's one subtle gotcha that the `gh` CLI imposes on us, documented here so
+that future debugging doesn't have to re-derive it.
+
+When `GH_HOST` is set to anything other than `github.com`, gh assumes the
+target is a **GitHub Enterprise Server** instance and hardcodes the GHES URL
+convention: every REST call is prefixed with `/api/v3/`. So instead of
+sending `GET /user`, gh sends `GET /api/v3/user`. There is no env var or
+config flag that turns this off; it's compiled into gh's HTTP client.
+
+`api.github.com` does **not** use that prefix — `/user` is the canonical
+path. This proxy speaks the `api.github.com` URL surface (so that requests
+forward 1:1 upstream), so without intervention every `gh` call against the
+proxy 404s.
+
+The fix is a tiny middleware in `src/app.ts` that strips `/api/v3` from
+incoming URLs before the auth/blocklist/forward pipeline sees them. Both
+`/user` and `/api/v3/user` reach the same handler, are subject to the same
+auth, and are subject to the same blocklist (so `POST /api/v3/repos/o/r/git/commits`
+is still rejected).
+
+**Future maintenance note:** if GitHub ever introduces an `/api/v4/` REST
+surface and the gh CLI starts sending `/api/v4/...` to non-github.com hosts,
+add the new prefix to the `STRIP_PREFIXES` array in `src/app.ts`. The
+GraphQL endpoint (`/graphql`) is independent of this REST versioning and
+needs no rewrite.
+
 ---
 
 ## Architecture

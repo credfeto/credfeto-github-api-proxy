@@ -128,4 +128,54 @@ describe("App integration", () => {
     expect(res.status).toBe(200);
     expect(res.body.proxied).toBe(true);
   });
+
+  // ── /api/v3 prefix handling ──────────────────────────────────────────────
+  // gh CLI prepends `/api/v3/` to every REST call when GH_HOST is a non-
+  // github.com host (Enterprise URL convention). Both shapes must reach the
+  // same auth, the same blocklist, and the same forward target.
+
+  it("forwards GET /api/v3/user identically to /user", async () => {
+    const res = await request(app)
+      .get("/api/v3/user")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.proxied).toBe(true);
+  });
+
+  it("forwards GET /api/v3/repos/:o/:r/issues identically to /repos/...", async () => {
+    const res = await request(app)
+      .get("/api/v3/repos/alice/myrepo/issues")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.proxied).toBe(true);
+  });
+
+  it("blocks POST /api/v3/repos/:o/:r/git/commits (blocklist still fires)", async () => {
+    const res = await request(app)
+      .post("/api/v3/repos/alice/myrepo/git/commits")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .send({ message: "test" });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/blocked/i);
+  });
+
+  it("blocks PUT /api/v3/repos/:o/:r/contents/* (blocklist still fires)", async () => {
+    const res = await request(app)
+      .put("/api/v3/repos/alice/myrepo/contents/README.md")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .send({});
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 401 for /api/v3/* with no token (auth still fires)", async () => {
+    const res = await request(app).get("/api/v3/repos/alice/myrepo/issues");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 403 for /api/v3/* with a wrong token (auth still fires)", async () => {
+    const res = await request(app)
+      .get("/api/v3/repos/alice/myrepo/issues")
+      .set("Authorization", "Bearer nope");
+    expect(res.status).toBe(403);
+  });
 });
