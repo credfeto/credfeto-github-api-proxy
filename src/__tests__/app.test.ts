@@ -178,6 +178,36 @@ describe("App integration", () => {
       .set("Authorization", "Bearer nope");
     expect(res.status).toBe(403);
   });
+
+  // ── /api/graphql path handling (Enterprise GraphQL path) ─────────────────
+  // gh CLI sends GraphQL to /api/graphql when GH_HOST is a non-github.com
+  // host. It must be rewritten to /graphql and pass through the same auth,
+  // blocklist, and forward pipeline as a direct POST /graphql call.
+
+  it("forwards allowed GraphQL query via /api/graphql", async () => {
+    const res = await request(app)
+      .post("/api/graphql")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .send({ query: `query { viewer { login } }` });
+    expect(res.status).toBe(200);
+    expect(res.body.proxied).toBe(true);
+  });
+
+  it("blocks createCommitOnBranch mutation via /api/graphql", async () => {
+    const res = await request(app)
+      .post("/api/graphql")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .send({ query: `mutation { createCommitOnBranch(input:{}) { clientMutationId } }` });
+    expect(res.status).toBe(403);
+    expect(res.body.reason).toMatch(/createCommitOnBranch/);
+  });
+
+  it("returns 401 for /api/graphql with no token (auth still fires)", async () => {
+    const res = await request(app)
+      .post("/api/graphql")
+      .send({ query: `query { viewer { login } }` });
+    expect(res.status).toBe(401);
+  });
 });
 
 // ── Logging ──────────────────────────────────────────────────────────────────
