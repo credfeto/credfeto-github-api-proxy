@@ -4,6 +4,14 @@ import { createAuthMiddleware, type AuthConfig } from "./auth.js";
 import { checkRestBlock, checkGraphQLBlock } from "./blocklist.js";
 import { forwardToGitHub } from "./proxy.js";
 
+function extractGraphQLOp(req: Request): string | null {
+  if (req.method !== "POST" || req.path !== "/graphql") return null;
+  const query: string = typeof req.body?.query === "string" ? req.body.query : "";
+  const match = /^\s*(query|mutation|subscription)\s*(\w+)?/i.exec(query);
+  if (match === null) return null;
+  return match[2] !== undefined ? `${match[1]}:${match[2]}` : match[1];
+}
+
 export function createApp(authConfig: AuthConfig): express.Application {
   const app = express();
 
@@ -48,6 +56,16 @@ export function createApp(authConfig: AuthConfig): express.Application {
   app.use(
     express.raw({ type: "*/*", limit: "50mb" })
   );
+
+  // ── Request logging ───────────────────────────────────────────────────────
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    res.on("finish", () => {
+      const op = extractGraphQLOp(req);
+      const detail = op !== null ? ` (${op})` : "";
+      console.log(`${req.method} ${req.url}${detail} -> ${res.statusCode}`);
+    });
+    next();
+  });
 
   // ── Health check (unauthenticated) ────────────────────────────────────────
   app.get("/health", (_req: Request, res: Response) => {

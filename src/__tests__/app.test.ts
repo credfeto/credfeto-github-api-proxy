@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import request from "supertest";
 import { createApp } from "../app.js";
 
@@ -207,5 +207,72 @@ describe("App integration", () => {
       .post("/api/graphql")
       .send({ query: `query { viewer { login } }` });
     expect(res.status).toBe(401);
+  });
+});
+
+// ── Logging ──────────────────────────────────────────────────────────────────
+
+describe("Request logging", () => {
+  const app = createApp(CONFIG);
+  let logSpy: MockInstance;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+  });
+
+  it("logs method, path, and status for a successful GET", async () => {
+    await request(app)
+      .get("/repos/alice/myrepo/issues")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/^GET \/repos\/alice\/myrepo\/issues -> 200$/));
+  });
+
+  it("logs 401 when no token is provided", async () => {
+    await request(app).get("/repos/alice/myrepo/issues");
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/-> 401$/));
+  });
+
+  it("logs 403 for a blocked REST operation", async () => {
+    await request(app)
+      .post("/repos/alice/myrepo/git/commits")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .send({ message: "test" });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/-> 403$/));
+  });
+
+  it("logs GraphQL operation type for an anonymous query", async () => {
+    await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .send({ query: `query { viewer { login } }` });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/POST \/graphql \(query\) -> 200/));
+  });
+
+  it("logs named GraphQL operation", async () => {
+    await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .send({ query: `query GetViewer { viewer { login } }` });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/POST \/graphql \(query:GetViewer\) -> 200/));
+  });
+
+  it("logs GraphQL mutation with operation name", async () => {
+    await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .send({ query: `mutation CreateIssue($input: CreateIssueInput!) { createIssue(input: $input) { issue { number } } }` });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/POST \/graphql \(mutation:CreateIssue\) -> 200/));
+  });
+
+  it("logs blocked GraphQL mutation with 403", async () => {
+    await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .send({ query: `mutation { createCommitOnBranch(input:{}) { clientMutationId } }` });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/POST \/graphql \(mutation\) -> 403/));
   });
 });
