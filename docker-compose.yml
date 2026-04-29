@@ -5,15 +5,9 @@ services:
       - "${PORT:-3000}:3000"
     environment:
       - PORT=3000
-      # Option A: credentials file (recommended for multiple agents)
-      # Uncomment and set the path inside the container, then add the volume mount below.
-      # - CREDENTIALS_FILE=/app/credentials.json
-      #
-      # Option B: single pair via environment variables (backward-compatible)
-      - PROXY_TOKEN=${PROXY_TOKEN}
-      - GITHUB_PAT=${GITHUB_PAT}
-    # volumes:
-    #   - ./credentials.json:/app/credentials.json:ro
+      - CREDENTIALS_FILE=/app/credentials.json
+    volumes:
+      - ./credentials.json:/app/credentials.json:ro
     restart: unless-stopped
     healthcheck:
       test:
