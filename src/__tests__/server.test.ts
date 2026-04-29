@@ -8,7 +8,7 @@ vi.mock("../proxy.js", () => ({
   forwardToGitHub: vi.fn((_req, res) => res.status(200).json({ proxied: true })),
 }));
 
-const CONFIG = { proxyToken: "test-token", githubPat: "ghp_test" };
+const CONFIG = [{ proxyToken: "test-token", githubPat: "ghp_test" }];
 
 describe("startServer", () => {
   let handle: ServerHandle;

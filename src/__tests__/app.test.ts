@@ -9,10 +9,12 @@ vi.mock("../proxy.js", () => ({
   }),
 }));
 
-const CONFIG = { proxyToken: "fake-proxy-token", githubPat: "ghp_real" };
+const PAIR_1 = { proxyToken: "fake-proxy-token", githubPat: "ghp_real" };
+const PAIR_2 = { proxyToken: "fake-proxy-token-2", githubPat: "ghp_real_2" };
+const CREDENTIALS = [PAIR_1, PAIR_2];
 
 describe("App integration", () => {
-  const app = createApp(CONFIG);
+  const app = createApp(CREDENTIALS);
 
   // ── Auth checks ─────────────────────────────────────────────────────────
 
@@ -21,11 +23,19 @@ describe("App integration", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 403 when wrong token is provided", async () => {
+  it("returns 401 when an unrecognised token is provided", async () => {
     const res = await request(app)
       .get("/repos/alice/myrepo/issues")
       .set("Authorization", "Bearer wrong");
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
+  });
+
+  it("accepts a request authenticated with the second credential pair", async () => {
+    const res = await request(app)
+      .get("/repos/alice/myrepo/issues")
+      .set("Authorization", `Bearer ${PAIR_2.proxyToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.proxied).toBe(true);
   });
 
   // ── REST blocklist ───────────────────────────────────────────────────────
@@ -33,7 +43,7 @@ describe("App integration", () => {
   it("blocks POST to git/commits", async () => {
     const res = await request(app)
       .post("/repos/alice/myrepo/git/commits")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ message: "test" });
     expect(res.status).toBe(403);
     expect(res.body.message).toMatch(/blocked/i);
@@ -42,7 +52,7 @@ describe("App integration", () => {
   it("blocks POST to git/blobs", async () => {
     const res = await request(app)
       .post("/repos/alice/myrepo/git/blobs")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ content: "hello" });
     expect(res.status).toBe(403);
   });
@@ -50,7 +60,7 @@ describe("App integration", () => {
   it("blocks PUT to contents (file update)", async () => {
     const res = await request(app)
       .put("/repos/alice/myrepo/contents/README.md")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({});
     expect(res.status).toBe(403);
   });
@@ -58,7 +68,7 @@ describe("App integration", () => {
   it("blocks PATCH to git/refs (advance branch)", async () => {
     const res = await request(app)
       .patch("/repos/alice/myrepo/git/refs/heads/main")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ sha: "abc" });
     expect(res.status).toBe(403);
   });
@@ -68,7 +78,7 @@ describe("App integration", () => {
   it("blocks createCommitOnBranch GraphQL mutation", async () => {
     const res = await request(app)
       .post("/graphql")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ query: `mutation { createCommitOnBranch(input:{}) { clientMutationId } }` });
     expect(res.status).toBe(403);
     expect(res.body.reason).toMatch(/createCommitOnBranch/);
@@ -77,7 +87,7 @@ describe("App integration", () => {
   it("blocks deleteRef GraphQL mutation", async () => {
     const res = await request(app)
       .post("/graphql")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ query: `mutation { deleteRef(input:{}) { clientMutationId } }` });
     expect(res.status).toBe(403);
   });
@@ -87,7 +97,7 @@ describe("App integration", () => {
   it("forwards GET /repos/:owner/:repo/issues to GitHub", async () => {
     const res = await request(app)
       .get("/repos/alice/myrepo/issues")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`);
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
     expect(res.status).toBe(200);
     expect(res.body.proxied).toBe(true);
   });
@@ -95,7 +105,7 @@ describe("App integration", () => {
   it("forwards POST /repos/:owner/:repo/issues (create issue)", async () => {
     const res = await request(app)
       .post("/repos/alice/myrepo/issues")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ title: "Bug report" });
     expect(res.status).toBe(200);
     expect(res.body.proxied).toBe(true);
@@ -104,7 +114,7 @@ describe("App integration", () => {
   it("forwards GET /repos/:owner/:repo/actions/runs", async () => {
     const res = await request(app)
       .get("/repos/alice/myrepo/actions/runs")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`);
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
     expect(res.status).toBe(200);
     expect(res.body.proxied).toBe(true);
   });
@@ -112,7 +122,7 @@ describe("App integration", () => {
   it("forwards createIssue GraphQL mutation", async () => {
     const res = await request(app)
       .post("/graphql")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({
         query: `mutation { createIssue(input:{repositoryId:"R_x",title:"T"}) { issue { number } } }`,
       });
@@ -123,7 +133,7 @@ describe("App integration", () => {
   it("forwards viewer GraphQL query", async () => {
     const res = await request(app)
       .post("/graphql")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ query: `query { viewer { login } }` });
     expect(res.status).toBe(200);
     expect(res.body.proxied).toBe(true);
@@ -137,7 +147,7 @@ describe("App integration", () => {
   it("forwards GET /api/v3/user identically to /user", async () => {
     const res = await request(app)
       .get("/api/v3/user")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`);
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
     expect(res.status).toBe(200);
     expect(res.body.proxied).toBe(true);
   });
@@ -145,7 +155,7 @@ describe("App integration", () => {
   it("forwards GET /api/v3/repos/:o/:r/issues identically to /repos/...", async () => {
     const res = await request(app)
       .get("/api/v3/repos/alice/myrepo/issues")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`);
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
     expect(res.status).toBe(200);
     expect(res.body.proxied).toBe(true);
   });
@@ -153,7 +163,7 @@ describe("App integration", () => {
   it("blocks POST /api/v3/repos/:o/:r/git/commits (blocklist still fires)", async () => {
     const res = await request(app)
       .post("/api/v3/repos/alice/myrepo/git/commits")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ message: "test" });
     expect(res.status).toBe(403);
     expect(res.body.message).toMatch(/blocked/i);
@@ -162,7 +172,7 @@ describe("App integration", () => {
   it("blocks PUT /api/v3/repos/:o/:r/contents/* (blocklist still fires)", async () => {
     const res = await request(app)
       .put("/api/v3/repos/alice/myrepo/contents/README.md")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({});
     expect(res.status).toBe(403);
   });
@@ -172,11 +182,11 @@ describe("App integration", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 403 for /api/v3/* with a wrong token (auth still fires)", async () => {
+  it("returns 401 for /api/v3/* with an unrecognised token (auth still fires)", async () => {
     const res = await request(app)
       .get("/api/v3/repos/alice/myrepo/issues")
       .set("Authorization", "Bearer nope");
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
   // ── /api/graphql path handling (Enterprise GraphQL path) ─────────────────
@@ -187,7 +197,7 @@ describe("App integration", () => {
   it("forwards allowed GraphQL query via /api/graphql", async () => {
     const res = await request(app)
       .post("/api/graphql")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ query: `query { viewer { login } }` });
     expect(res.status).toBe(200);
     expect(res.body.proxied).toBe(true);
@@ -196,7 +206,7 @@ describe("App integration", () => {
   it("blocks createCommitOnBranch mutation via /api/graphql", async () => {
     const res = await request(app)
       .post("/api/graphql")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ query: `mutation { createCommitOnBranch(input:{}) { clientMutationId } }` });
     expect(res.status).toBe(403);
     expect(res.body.reason).toMatch(/createCommitOnBranch/);
@@ -213,7 +223,7 @@ describe("App integration", () => {
 // ── Logging ──────────────────────────────────────────────────────────────────
 
 describe("Request logging", () => {
-  const app = createApp(CONFIG);
+  const app = createApp(CREDENTIALS);
   let logSpy: MockInstance;
 
   beforeEach(() => {
@@ -227,7 +237,7 @@ describe("Request logging", () => {
   it("logs method, path, and status for a successful GET", async () => {
     await request(app)
       .get("/repos/alice/myrepo/issues")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`);
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
     expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/^GET \/repos\/alice\/myrepo\/issues -> 200$/));
   });
 
@@ -239,7 +249,7 @@ describe("Request logging", () => {
   it("logs 403 for a blocked REST operation", async () => {
     await request(app)
       .post("/repos/alice/myrepo/git/commits")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ message: "test" });
     expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/-> 403$/));
   });
@@ -247,7 +257,7 @@ describe("Request logging", () => {
   it("logs GraphQL operation type for an anonymous query", async () => {
     await request(app)
       .post("/graphql")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ query: `query { viewer { login } }` });
     expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/POST \/graphql \(query\) -> 200/));
   });
@@ -255,7 +265,7 @@ describe("Request logging", () => {
   it("logs named GraphQL operation", async () => {
     await request(app)
       .post("/graphql")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ query: `query GetViewer { viewer { login } }` });
     expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/POST \/graphql \(query:GetViewer\) -> 200/));
   });
@@ -263,7 +273,7 @@ describe("Request logging", () => {
   it("logs GraphQL mutation with operation name", async () => {
     await request(app)
       .post("/graphql")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ query: `mutation CreateIssue($input: CreateIssueInput!) { createIssue(input: $input) { issue { number } } }` });
     expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/POST \/graphql \(mutation:CreateIssue\) -> 200/));
   });
@@ -271,7 +281,7 @@ describe("Request logging", () => {
   it("logs blocked GraphQL mutation with 403", async () => {
     await request(app)
       .post("/graphql")
-      .set("Authorization", `Bearer ${CONFIG.proxyToken}`)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ query: `mutation { createCommitOnBranch(input:{}) { clientMutationId } }` });
     expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/POST \/graphql \(mutation\) -> 403/));
   });

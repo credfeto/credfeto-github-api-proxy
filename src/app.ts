@@ -1,6 +1,6 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
-import { createAuthMiddleware, type AuthConfig } from "./auth.js";
+import { createAuthMiddleware, type CredentialPair } from "./auth.js";
 import { checkRestBlock, checkGraphQLBlock } from "./blocklist.js";
 import { forwardToGitHub } from "./proxy.js";
 
@@ -12,7 +12,7 @@ function extractGraphQLOp(req: Request): string | null {
   return match[2] !== undefined ? `${match[1]}:${match[2]}` : match[1];
 }
 
-export function createApp(authConfig: AuthConfig): express.Application {
+export function createApp(credentials: CredentialPair[]): express.Application {
   const app = express();
 
   // ── Normalise Enterprise-shaped paths to github.com equivalents ──────────
@@ -73,7 +73,7 @@ export function createApp(authConfig: AuthConfig): express.Application {
   });
 
   // ── Authentication ─────────────────────────────────────────────────────────
-  app.use(createAuthMiddleware(authConfig));
+  app.use(createAuthMiddleware(credentials));
 
   // ── REST blocklist ─────────────────────────────────────────────────────────
   app.use((req: Request, res: Response, next: NextFunction) => {
