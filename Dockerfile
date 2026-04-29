@@ -14,6 +14,12 @@ FROM builder AS tester
 
 RUN npm test
 
+# Copy the startup-integration test script and run it against the built bundle.
+# This validates real process exit codes for all bad-config scenarios and
+# confirms the app starts successfully when given a valid credentials file.
+COPY scripts/test-startup.sh ./scripts/test-startup.sh
+RUN sh scripts/test-startup.sh
+
 
 FROM gcr.io/distroless/nodejs20-debian12:nonroot AS runtime
 
