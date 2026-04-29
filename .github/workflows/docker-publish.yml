@@ -2,8 +2,6 @@ name: "Docker: Build and Push"
 
 on:
   push:
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -18,7 +16,17 @@ jobs:
       - name: "Set up Docker Buildx"
         uses: docker/setup-buildx-action@v3.10.0
 
-      - name: "Build and push"
+      - name: "Build (other branches)"
+        if: github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/')
+        uses: docker/build-push-action@v6.15.0
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: "Build and push to main registry"
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6.15.0
         with:
           context: .
@@ -26,5 +34,17 @@ jobs:
           tags: |
             docker-registry.markridgwell.com/credfeto/github-api-proxy:latest
             docker-registry.markridgwell.com/credfeto/github-api-proxy:${{github.sha}}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: "Build and push to release registry"
+        if: startsWith(github.ref, 'refs/heads/release/')
+        uses: docker/build-push-action@v6.15.0
+        with:
+          context: .
+          push: true
+          tags: |
+            release-docker-registry.markridgwell.com/credfeto/github-api-proxy:latest
+            release-docker-registry.markridgwell.com/credfeto/github-api-proxy:${{github.sha}}
           cache-from: type=gha
           cache-to: type=gha,mode=max
