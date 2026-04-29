@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 
-export interface AuthConfig {
+export interface CredentialPair {
   /** The fake token agents present to the proxy */
   proxyToken: string;
   /** The real GitHub PAT the proxy swaps in */
@@ -8,16 +8,17 @@ export interface AuthConfig {
 }
 
 /**
- * Middleware: validate that the incoming request carries the expected proxy
- * token, then replace it with the real GitHub PAT before forwarding.
+ * Middleware: validate that the incoming request carries a known proxy token,
+ * then replace it with the matching real GitHub PAT before forwarding.
  *
  * GitHub uses the Authorization header in the form:
  *   Authorization: Bearer <token>
  *   Authorization: token <token>
  *
- * Both forms are handled.
+ * Both forms are handled. If no credential pair matches the presented token,
+ * the request is rejected with 401.
  */
-export function createAuthMiddleware(config: AuthConfig) {
+export function createAuthMiddleware(credentials: CredentialPair[]) {
   return function authMiddleware(req: Request, res: Response, next: NextFunction): void {
     const authHeader = req.headers["authorization"];
 
@@ -34,13 +35,14 @@ export function createAuthMiddleware(config: AuthConfig) {
     }
 
     const presented = match[1].trim();
-    if (presented !== config.proxyToken) {
-      res.status(403).json({ message: "Invalid proxy token" });
+    const credential = credentials.find(c => c.proxyToken === presented);
+    if (!credential) {
+      res.status(401).json({ message: "Invalid proxy token" });
       return;
     }
 
-    // Swap in the real PAT
-    req.headers["authorization"] = `token ${config.githubPat}`;
+    // Swap in the real PAT for the matched credential pair
+    req.headers["authorization"] = `token ${credential.githubPat}`;
     next();
   };
 }
