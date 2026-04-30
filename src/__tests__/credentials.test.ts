@@ -72,12 +72,59 @@ describe("loadCredentials", () => {
 
   // ── Failure: file unreadable ─────────────────────────────────────────────
 
-  it("exits with FILE_UNREADABLE when the file cannot be read", () => {
+  it("exits with FILE_UNREADABLE when the file does not exist (ENOENT)", () => {
     process.env.CREDENTIALS_FILE = "/nonexistent/path.json";
     (readFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      throw new Error("ENOENT");
+      throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
     });
     expect(expectExit(() => loadCredentials())).toBe(EXIT_CODES.FILE_UNREADABLE);
+  });
+
+  it("exits with FILE_UNREADABLE when the file exists but is not readable (EACCES)", () => {
+    process.env.CREDENTIALS_FILE = "/proxy/credentials.json";
+    (readFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw Object.assign(new Error("EACCES: permission denied, open '/proxy/credentials.json'"), {
+        code: "EACCES",
+        errno: -13,
+        syscall: "open",
+        path: "/proxy/credentials.json",
+      });
+    });
+    expect(expectExit(() => loadCredentials())).toBe(EXIT_CODES.FILE_UNREADABLE);
+  });
+
+  it("exits with FILE_UNREADABLE when the file exists but is not readable (EPERM)", () => {
+    process.env.CREDENTIALS_FILE = "/proxy/credentials.json";
+    (readFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw Object.assign(new Error("EPERM: operation not permitted, open '/proxy/credentials.json'"), {
+        code: "EPERM",
+        errno: -1,
+        syscall: "open",
+        path: "/proxy/credentials.json",
+      });
+    });
+    expect(expectExit(() => loadCredentials())).toBe(EXIT_CODES.FILE_UNREADABLE);
+  });
+
+  it("exits with FILE_UNREADABLE when a generic read error is thrown", () => {
+    process.env.CREDENTIALS_FILE = "/app/credentials.json";
+    (readFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("unexpected read error");
+    });
+    expect(expectExit(() => loadCredentials())).toBe(EXIT_CODES.FILE_UNREADABLE);
+  });
+
+  it("logs the credentials file path when the file cannot be read", () => {
+    const filePath = "/proxy/credentials.json";
+    process.env.CREDENTIALS_FILE = filePath;
+    (readFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw Object.assign(new Error("EACCES: permission denied, open '/proxy/credentials.json'"), {
+        code: "EACCES",
+      });
+    });
+    const consoleErrorSpy = vi.mocked(console.error);
+    expect(expectExit(() => loadCredentials())).toBe(EXIT_CODES.FILE_UNREADABLE);
+    expect(consoleErrorSpy.mock.calls.some(args => String(args[0]).includes(filePath))).toBe(true);
   });
 
   // ── Failure: invalid JSON ────────────────────────────────────────────────

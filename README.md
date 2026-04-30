@@ -188,25 +188,60 @@ Tests cover:
 
 ## Docker
 
-Both the fake proxy token and the real GitHub PAT are passed as environment
-variables — never baked into the image.
+Both the fake proxy token and the real GitHub PAT are passed via a
+**credentials file** — never baked into the image.
+
+### Credentials file
+
+Create a `credentials.json` file (using `credentials.example.json` as a
+template) with one or more `{proxyToken, githubPat}` pairs:
+
+```json
+[
+  {
+    "proxyToken": "your-fake-agent-token-here",
+    "githubPat": "ghp_your_real_github_pat_here"
+  }
+]
+```
+
+> **File-permission requirement when running in Docker**
+>
+> The production container image runs as the `nonroot` user (UID **65532**).
+> The credentials file must be readable by that UID, so ensure it has at least
+> world-readable permissions on the host before mounting it:
+>
+> ```sh
+> chmod 644 credentials.json
+> ```
+>
+> If the file is readable only by its owner (e.g. `chmod 600`) the container
+> will fail to start with:
+> ```
+> Failed to read credentials file: … Error: EACCES: permission denied, open '…'
+> ```
 
 ### Build and run
 
 ```sh
+# Ensure the credentials file is world-readable before mounting it
+chmod 644 credentials.json
+
 docker build -t github-api-proxy .
 
 docker run -p 3000:3000 \
-  -e PROXY_TOKEN=your-fake-agent-token \
-  -e GITHUB_PAT=ghp_your_real_github_pat \
+  -e CREDENTIALS_FILE=/app/credentials.json \
+  -v "$(pwd)/credentials.json:/app/credentials.json:ro" \
   github-api-proxy
 ```
 
 ### docker-compose
 
-Copy `.env.example` to `.env`, fill in the values, then:
+Copy `credentials.example.json` to `credentials.json`, fill in your tokens,
+make it readable, then:
 
 ```sh
+chmod 644 credentials.json
 docker compose up -d
 ```
 
