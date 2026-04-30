@@ -122,14 +122,9 @@ describe("loadCredentials", () => {
         code: "EACCES",
       });
     });
-    try {
-      loadCredentials();
-    } catch {
-      // swallowed by MockExitError
-    }
     const consoleErrorSpy = vi.mocked(console.error);
-    const calls = consoleErrorSpy.mock.calls;
-    expect(calls.some(args => String(args[0]).includes(filePath))).toBe(true);
+    expect(expectExit(() => loadCredentials())).toBe(EXIT_CODES.FILE_UNREADABLE);
+    expect(consoleErrorSpy.mock.calls.some(args => String(args[0]).includes(filePath))).toBe(true);
   });
 
   // ── Failure: invalid JSON ────────────────────────────────────────────────
