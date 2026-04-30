@@ -92,10 +92,18 @@ assert_exits_nonzero \
   "No CREDENTIALS_FILE env var" 1 \
   env -i PATH="$PATH" node dist/index.js
 
-# 2. CREDENTIALS_FILE points to a non-existent file → exit 2
+# 2a. CREDENTIALS_FILE points to a non-existent file → exit 2
 assert_exits_nonzero \
   "Credentials file does not exist" 2 \
   env -i PATH="$PATH" CREDENTIALS_FILE=/tmp/no-such-file.json node dist/index.js
+
+# 2b. CREDENTIALS_FILE points to a file that exists but is not readable → exit 2
+printf '[{"proxyToken":"fake-proxy-token","githubPat":"ghp_realtoken"}]' >/tmp/test-unreadable.json
+chmod 000 /tmp/test-unreadable.json
+assert_exits_nonzero \
+  "Credentials file exists but is not readable (EACCES)" 2 \
+  env -i PATH="$PATH" CREDENTIALS_FILE=/tmp/test-unreadable.json node dist/index.js
+chmod 644 /tmp/test-unreadable.json
 
 # 3. Credentials file contains invalid JSON → exit 3
 printf 'not valid json{{' >/tmp/test-invalid-json.json
