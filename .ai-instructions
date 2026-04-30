@@ -1,0 +1,11 @@
+# AI Instructions
+
+Before performing any work, read this file and all files in the [Local AI Memory](ai/local) folder.
+
+* [Local](ai/local/index.md) is the master list of all local instructions that apply to this repo.
+
+## Management Rules
+
+- Whenever an instruction to remember something is given, update the appropriate memory file and this index.
+- Whenever adding a new rule, read every existing instruction file and the index and check for consistency.
+- Whenever starting work — re-read all these files before doing anything else.
