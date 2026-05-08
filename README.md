@@ -1,5 +1,8 @@
 # GitHub API Proxy
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Changelog](https://img.shields.io/badge/changelog-view-blue)](CHANGELOG.md)
+
 A lightweight reverse proxy that sits between an AI agent and the GitHub API.
 The proxy holds your real GitHub Personal Access Token (PAT); agents get a
 **fake proxy token** that only works through this proxy and can never be used
@@ -17,7 +20,7 @@ CI/Actions results, etc.
 ### R1 — Token isolation
 
 | Requirement | Detail |
-|---|---|
+| --- | --- |
 | Agents receive a fake token | The `PROXY_TOKEN` env var is issued to agents. It has no value outside the proxy. |
 | Proxy holds the real PAT | `GITHUB_PAT` is only known to the proxy process. Agents never see it. |
 | Token swap is transparent | The proxy replaces `Authorization: Bearer <fake>` with `Authorization: token <real>` before forwarding. Both `Bearer` and `token` schemes are accepted from the agent side. |
@@ -27,7 +30,7 @@ CI/Actions results, etc.
 All of the following return **HTTP 403** with a JSON body explaining why:
 
 | Method | Path pattern | Why blocked |
-|---|---|---|
+| --- | --- | --- |
 | `POST` | `/repos/:owner/:repo/git/blobs` | Creates a git blob — raw building block of commits |
 | `POST` | `/repos/:owner/:repo/git/trees` | Creates a git tree — raw building block of commits |
 | `POST` | `/repos/:owner/:repo/git/commits` | Directly creates a git commit |
@@ -46,7 +49,7 @@ All of the following return **HTTP 403** with a JSON body explaining why:
 GraphQL mutations that create, move, or delete git objects are blocked:
 
 | Mutation | Why blocked |
-|---|---|
+| --- | --- |
 | `createCommitOnBranch` | Commits code directly via GraphQL |
 | `createRef` | Creates a branch or tag |
 | `updateRef` | Advances a branch |
@@ -120,7 +123,7 @@ needs no rewrite.
 
 ## Architecture
 
-```
+```text
 Agent / gh CLI
       │  Authorization: Bearer <fake-proxy-token>
       ▼
@@ -217,7 +220,8 @@ template) with one or more `{proxyToken, githubPat}` pairs:
 >
 > If the file is readable only by its owner (e.g. `chmod 600`) the container
 > will fail to start with:
-> ```
+>
+> ```text
 > Failed to read credentials file: … Error: EACCES: permission denied, open '…'
 > ```
 
