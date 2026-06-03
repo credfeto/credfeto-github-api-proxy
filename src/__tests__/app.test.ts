@@ -302,48 +302,24 @@ describe("createPullRequest headRepositoryId transform", () => {
     mockForward.mockClear();
   });
 
-  it("injects headRepositoryId when absent in createPullRequest input", async () => {
+  it.each<{ label: string; input: Record<string, unknown> }>([
+    {
+      label: "absent",
+      input: { repositoryId: "R_base123", baseRefName: "main", headRefName: "feature/my-branch", title: "My PR", draft: true },
+    },
+    {
+      label: "null",
+      input: { repositoryId: "R_base456", headRepositoryId: null, baseRefName: "main", headRefName: "feature/foo", title: "PR" },
+    },
+  ])("injects headRepositoryId when $label in createPullRequest input", async ({ input }) => {
     await request(app)
       .post("/graphql")
       .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
-      .send({
-        query: CREATE_PR_MUTATION,
-        variables: {
-          input: {
-            repositoryId: "R_base123",
-            baseRefName: "main",
-            headRefName: "feature/my-branch",
-            title: "My PR",
-            draft: true,
-          },
-        },
-      });
+      .send({ query: CREATE_PR_MUTATION, variables: { input } });
 
     expect(mockForward).toHaveBeenCalledOnce();
     const forwarded = mockForward.mock.calls[0][0].body as { variables: { input: { headRepositoryId: string } } };
-    expect(forwarded.variables.input.headRepositoryId).toBe("R_base123");
-  });
-
-  it("injects headRepositoryId when null in createPullRequest input", async () => {
-    await request(app)
-      .post("/graphql")
-      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
-      .send({
-        query: CREATE_PR_MUTATION,
-        variables: {
-          input: {
-            repositoryId: "R_base456",
-            headRepositoryId: null,
-            baseRefName: "main",
-            headRefName: "feature/foo",
-            title: "PR",
-          },
-        },
-      });
-
-    expect(mockForward).toHaveBeenCalledOnce();
-    const forwarded = mockForward.mock.calls[0][0].body as { variables: { input: { headRepositoryId: string } } };
-    expect(forwarded.variables.input.headRepositoryId).toBe("R_base456");
+    expect(forwarded.variables.input.headRepositoryId).toBe(input.repositoryId as string);
   });
 
   it("does not overwrite an existing headRepositoryId", async () => {

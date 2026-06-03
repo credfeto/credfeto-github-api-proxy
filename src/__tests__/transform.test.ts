@@ -15,6 +15,16 @@ const CREATE_ISSUE_MUTATION = `mutation CreateIssue($input: CreateIssueInput!) {
 
 const VIEWER_QUERY = `query { viewer { login } }`;
 
+interface PrInput {
+  repositoryId: string;
+  headRepositoryId?: string | null;
+  baseRefName: string;
+  headRefName: string;
+  title: string;
+  draft?: boolean;
+  body?: string;
+}
+
 describe("transformCreatePullRequest — non-mutation passthrough", () => {
   it("passes through null unchanged", () => {
     expect(transformCreatePullRequest(null)).toBeNull();
@@ -44,54 +54,31 @@ describe("transformCreatePullRequest — non-mutation passthrough", () => {
 });
 
 describe("transformCreatePullRequest — headRepositoryId missing", () => {
-  it("sets headRepositoryId to repositoryId when headRepositoryId is absent", () => {
-    const body = {
-      query: CREATE_PR_MUTATION,
-      variables: {
-        input: {
-          repositoryId: "R_base123",
-          baseRefName: "main",
-          headRefName: "feature/my-branch",
-          title: "My PR",
-          draft: true,
-        },
-      },
-    };
+  it.each<{ label: string; input: PrInput }>([
+    {
+      label: "absent",
+      input: { repositoryId: "R_base123", baseRefName: "main", headRefName: "feature/my-branch", title: "My PR", draft: true },
+    },
+    {
+      label: "null",
+      input: { repositoryId: "R_base456", headRepositoryId: null, baseRefName: "main", headRefName: "feature/foo", title: "PR" },
+    },
+  ])("sets headRepositoryId to repositoryId when headRepositoryId is $label", ({ input }) => {
+    const body = { query: CREATE_PR_MUTATION, variables: { input } };
     const result = transformCreatePullRequest(body) as typeof body;
-    expect(result.variables.input.headRepositoryId).toBe("R_base123");
-  });
-
-  it("sets headRepositoryId to repositoryId when headRepositoryId is null", () => {
-    const body = {
-      query: CREATE_PR_MUTATION,
-      variables: {
-        input: {
-          repositoryId: "R_base456",
-          headRepositoryId: null,
-          baseRefName: "main",
-          headRefName: "feature/foo",
-          title: "PR",
-        },
-      },
-    };
-    const result = transformCreatePullRequest(body) as typeof body;
-    expect(result.variables.input.headRepositoryId).toBe("R_base456");
+    expect(result.variables.input.headRepositoryId).toBe(input.repositoryId);
   });
 
   it("preserves all other input fields when transforming", () => {
-    const body = {
-      query: CREATE_PR_MUTATION,
-      variables: {
-        input: {
-          repositoryId: "R_base789",
-          baseRefName: "main",
-          headRefName: "feature/bar",
-          title: "My title",
-          body: "My body",
-          draft: false,
-        },
-      },
+    const input: PrInput = {
+      repositoryId: "R_base789",
+      baseRefName: "main",
+      headRefName: "feature/bar",
+      title: "My title",
+      body: "My body",
+      draft: false,
     };
+    const body = { query: CREATE_PR_MUTATION, variables: { input } };
     const result = transformCreatePullRequest(body) as typeof body;
     expect(result.variables.input.repositoryId).toBe("R_base789");
     expect(result.variables.input.baseRefName).toBe("main");
@@ -138,21 +125,11 @@ describe("transformCreatePullRequest — headRepositoryId already set", () => {
 });
 
 describe("transformCreatePullRequest — missing input fields", () => {
-  it("passes through when variables.input is absent", () => {
-    const body = { query: CREATE_PR_MUTATION, variables: {} };
-    expect(transformCreatePullRequest(body)).toBe(body);
-  });
-
-  it("passes through when variables is absent", () => {
-    const body = { query: CREATE_PR_MUTATION };
-    expect(transformCreatePullRequest(body)).toBe(body);
-  });
-
-  it("passes through when repositoryId is not a string", () => {
-    const body = {
-      query: CREATE_PR_MUTATION,
-      variables: { input: { repositoryId: 42 } },
-    };
+  it.each([
+    { label: "variables.input is absent", body: { query: CREATE_PR_MUTATION, variables: {} } },
+    { label: "variables is absent", body: { query: CREATE_PR_MUTATION } },
+    { label: "repositoryId is not a string", body: { query: CREATE_PR_MUTATION, variables: { input: { repositoryId: 42 } } } },
+  ])("passes through when $label", ({ body }) => {
     expect(transformCreatePullRequest(body)).toBe(body);
   });
 });
