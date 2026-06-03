@@ -14,7 +14,6 @@ This is an index of local instructions that apply to just this project.
 
 ## Instruction Files
 <!-- Locally Maintained -->
-
 | File | Load When | Covers |
 | --- | --- | --- |
 | [gh-proxy-usage.instructions.md](gh-proxy-usage.instructions.md) | Using `gh` CLI with `GH_HOST` set to this proxy | Required `--head owner:branch` flag for `gh pr create`, background on PR creation failure |
