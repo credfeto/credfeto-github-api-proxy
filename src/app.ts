@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import { createAuthMiddleware, type CredentialPair } from "./auth.js";
 import { checkRestBlock, checkGraphQLBlock } from "./blocklist.js";
 import { forwardToGitHub } from "./proxy.js";
+import { transformCreatePullRequest } from "./transform.js";
 
 function extractGraphQLOp(req: Request): string | null {
   if (req.method !== "POST" || req.path !== "/graphql") return null;
@@ -100,6 +101,13 @@ export function createApp(credentials: CredentialPair[]): express.Application {
       });
       return;
     }
+    next();
+  });
+
+  // ── GraphQL mutation transforms ────────────────────────────────────────────
+  // Applied after the blocklist so blocked mutations never reach this stage.
+  app.post("/graphql", (req: Request, _res: Response, next: NextFunction) => {
+    req.body = transformCreatePullRequest(req.body);
     next();
   });
 

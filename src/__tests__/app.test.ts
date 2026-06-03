@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import request from "supertest";
 import { createApp } from "../app.js";
+import { forwardToGitHub } from "../proxy.js";
 
 // Prevent any real network calls — tests must not hit api.github.com
 vi.mock("../proxy.js", () => ({
@@ -284,5 +285,98 @@ describe("Request logging", () => {
       .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
       .send({ query: `mutation { createCommitOnBranch(input:{}) { clientMutationId } }` });
     expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/POST \/graphql \(mutation\) -> 403/));
+  });
+});
+
+// ── createPullRequest headRepositoryId transform ──────────────────────────────
+
+const CREATE_PR_MUTATION = `mutation CreatePullRequest($input: CreatePullRequestInput!) {
+  createPullRequest(input: $input) { pullRequest { number url } }
+}`;
+
+describe("createPullRequest headRepositoryId transform", () => {
+  const app = createApp(CREDENTIALS);
+  const mockForward = vi.mocked(forwardToGitHub);
+
+  beforeEach(() => {
+    mockForward.mockClear();
+  });
+
+  it.each<{ label: string; input: Record<string, unknown> }>([
+    {
+      label: "absent",
+      input: { repositoryId: "R_base123", baseRefName: "main", headRefName: "feature/my-branch", title: "My PR", draft: true },
+    },
+    {
+      label: "null",
+      input: { repositoryId: "R_base456", headRepositoryId: null, baseRefName: "main", headRefName: "feature/foo", title: "PR" },
+    },
+  ])("injects headRepositoryId when $label in createPullRequest input", async ({ input }) => {
+    await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ query: CREATE_PR_MUTATION, variables: { input } });
+
+    expect(mockForward).toHaveBeenCalledOnce();
+    const forwarded = mockForward.mock.calls[0][0].body as { variables: { input: { headRepositoryId: string } } };
+    expect(forwarded.variables.input.headRepositoryId).toBe(input.repositoryId as string);
+  });
+
+  it("does not overwrite an existing headRepositoryId", async () => {
+    await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({
+        query: CREATE_PR_MUTATION,
+        variables: {
+          input: {
+            repositoryId: "R_base",
+            headRepositoryId: "R_fork",
+            baseRefName: "main",
+            headRefName: "feature/fork-branch",
+            title: "Fork PR",
+          },
+        },
+      });
+
+    expect(mockForward).toHaveBeenCalledOnce();
+    const forwarded = mockForward.mock.calls[0][0].body as { variables: { input: { headRepositoryId: string } } };
+    expect(forwarded.variables.input.headRepositoryId).toBe("R_fork");
+  });
+
+  it("applies transform via /api/graphql path as well", async () => {
+    await request(app)
+      .post("/api/graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({
+        query: CREATE_PR_MUTATION,
+        variables: {
+          input: {
+            repositoryId: "R_base789",
+            baseRefName: "main",
+            headRefName: "feature/bar",
+            title: "Bar PR",
+          },
+        },
+      });
+
+    expect(mockForward).toHaveBeenCalledOnce();
+    const forwarded = mockForward.mock.calls[0][0].body as { variables: { input: { headRepositoryId: string } } };
+    expect(forwarded.variables.input.headRepositoryId).toBe("R_base789");
+  });
+
+  it("does not transform non-createPullRequest mutations", async () => {
+    const body = {
+      query: `mutation CreateIssue($input: CreateIssueInput!) { createIssue(input: $input) { issue { number } } }`,
+      variables: { input: { repositoryId: "R_x", title: "Bug" } },
+    };
+    await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send(body);
+
+    expect(mockForward).toHaveBeenCalledOnce();
+    const forwarded = mockForward.mock.calls[0][0].body as { variables: { input: { headRepositoryId?: string } } };
+    expect(forwarded.variables.input.headRepositoryId).toBeUndefined();
   });
 });
