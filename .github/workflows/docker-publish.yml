@@ -1,3 +1,4 @@
+--- # Docker: Build and Push
 name: "Docker: Build and Push"
 
 on:
@@ -11,14 +12,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v6.0.3
 
       - name: "Set up Docker Buildx"
-        uses: docker/setup-buildx-action@v3.10.0
+        uses: docker/setup-buildx-action@v4.1.0
 
       - name: "Build (other branches)"
         if: github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/')
-        uses: docker/build-push-action@v6.15.0
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .
           push: false
@@ -27,7 +28,7 @@ jobs:
 
       - name: "Build and push to main registry"
         if: github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6.15.0
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .
           push: true
@@ -39,7 +40,7 @@ jobs:
 
       - name: "Build and push to release registry"
         if: startsWith(github.ref, 'refs/heads/release/')
-        uses: docker/build-push-action@v6.15.0
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .
           push: true

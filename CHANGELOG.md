@@ -25,6 +25,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - Rewrite /api/graphql to /graphql for GitHub Enterprise gh CLI compatibility
 - Docker build fails when tests fail, preventing broken images from being published
 ### Changed
+- Updated GitHub Actions to Node.js 24 compatible versions: actions/checkout@v6.0.3, docker/setup-buildx-action@v4.1.0, docker/build-push-action@v7.2.0
 - Build uses esbuild to produce a single-file bundle with no node_modules in the runtime image
 ### Removed
 ### Deployment Changes
