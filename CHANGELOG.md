@@ -10,6 +10,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 
 ## [Unreleased]
 ### Security
+- Updated esbuild to 0.28.1 to fix path traversal vulnerability in local development server (GHSA-g7r4-m6w7-qqqr)
 ### Added
 - Initial implementation: GitHub API proxy that blocks all git-write operations while passing through issues, PRs, and CI reads
 - Docker support via Dockerfile, docker-compose, and distroless/nodejs20 runtime image running as nonroot
