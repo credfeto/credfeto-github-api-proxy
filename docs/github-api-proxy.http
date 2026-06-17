@@ -1,0 +1,226 @@
+# GitHub API Proxy – exposed endpoints
+#
+# This file documents every endpoint the proxy itself exposes.
+# Run these requests against a locally running proxy instance.
+#
+# Prerequisites:
+#   1. Copy credentials.example.json to credentials.json and fill in values.
+#   2. Start the proxy: npm start
+#   3. Set @proxyToken to the proxyToken value from credentials.json.
+
+@proxyHost = http://localhost:3000
+@proxyToken = your-proxy-token-here
+
+###############################################################################
+# Health
+###############################################################################
+
+### Health check — no authentication required
+# Expected: 200 {"status":"ok"}
+GET {{proxyHost}}/health
+
+###############################################################################
+# GraphQL (github.com path)
+###############################################################################
+
+### GraphQL query: viewer login — allowed (read-only query)
+# Expected: 200 with viewer.login
+POST {{proxyHost}}/graphql
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "query": "query { viewer { login } }"
+}
+
+###
+
+### GraphQL query: list open issues — allowed (read-only query)
+# Expected: 200 with issues list
+POST {{proxyHost}}/graphql
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "query": "query ListIssues($owner: String!, $repo: String!, $states: [IssueState!]) { repository(owner: $owner, name: $repo) { issues(first: 10, states: $states) { nodes { number title state } } } }",
+  "variables": {
+    "owner": "credfeto",
+    "repo": "credfeto-github-api-proxy",
+    "states": ["OPEN"]
+  }
+}
+
+###
+
+### GraphQL mutation: createPullRequest — allowed, headRepositoryId auto-populated
+# The proxy transforms this request: when headRepositoryId is absent and
+# repositoryId is present, it sets headRepositoryId = repositoryId so that
+# same-repository PRs succeed when gh CLI omits the field.
+# Expected: 200 (forwarded to GitHub; replace repositoryId with a real value)
+POST {{proxyHost}}/graphql
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "query": "mutation CreatePR($input: CreatePullRequestInput!) { createPullRequest(input: $input) { pullRequest { number url } } }",
+  "variables": {
+    "input": {
+      "repositoryId": "R_kgDOABCDEF",
+      "baseRefName": "main",
+      "headRefName": "feature/my-feature",
+      "title": "My pull request",
+      "body": "Description of the changes."
+    }
+  }
+}
+
+###############################################################################
+# GraphQL (GitHub Enterprise / gh CLI path — rewritten to /graphql)
+###############################################################################
+
+### GraphQL via Enterprise path — rewritten by proxy to /graphql before auth
+# Expected: same as the /graphql equivalents above
+POST {{proxyHost}}/api/graphql
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "query": "query { viewer { login } }"
+}
+
+###############################################################################
+# REST pass-through (github.com paths)
+###############################################################################
+
+### List open pull requests — allowed (read-only)
+# Expected: 200 with PR list from GitHub
+GET {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/pulls?state=open
+Authorization: Bearer {{proxyToken}}
+
+###
+
+### List open issues — allowed (read-only)
+# Expected: 200 with issues list from GitHub
+GET {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/issues?state=open
+Authorization: Bearer {{proxyToken}}
+
+###
+
+### Create an issue — allowed (non-git write)
+# Expected: 201 with the created issue
+POST {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/issues
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "title": "Test issue from .http file",
+  "body": "Created via the http test file."
+}
+
+###############################################################################
+# REST pass-through (GitHub Enterprise / gh CLI path — strips /api/v3 prefix)
+###############################################################################
+
+### Enterprise REST path — /api/v3 prefix is stripped by proxy before auth
+# Expected: same as GET /repos/… above
+GET {{proxyHost}}/api/v3/repos/credfeto/credfeto-github-api-proxy/issues?state=open
+Authorization: Bearer {{proxyToken}}
+
+###############################################################################
+# Blocked operations — proxy returns 403
+###############################################################################
+
+### BLOCKED: create a git commit via REST (Git Data API)
+# Expected: 403 {"message":"Operation blocked by proxy policy",...}
+POST {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/git/commits
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "message": "blocked commit attempt",
+  "tree": "abc1234567890abcdef1234567890abcdef123456",
+  "parents": ["def1234567890abcdef1234567890abcdef123456"]
+}
+
+###
+
+### BLOCKED: update a git ref via REST
+# Expected: 403 {"message":"Operation blocked by proxy policy",...}
+PATCH {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/git/refs/heads/main
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "sha": "abc1234567890abcdef1234567890abcdef123456",
+  "force": false
+}
+
+###
+
+### BLOCKED: write a file via Contents API
+# Expected: 403 {"message":"Operation blocked by proxy policy",...}
+PUT {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/contents/test.txt
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "message": "blocked file write attempt",
+  "content": "aGVsbG8="
+}
+
+###
+
+### BLOCKED: GraphQL mutation createCommitOnBranch
+# Expected: 403 {"message":"Operation blocked by proxy policy",...}
+POST {{proxyHost}}/graphql
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "query": "mutation CreateCommit($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+  "variables": {
+    "input": {
+      "branch": {
+        "repositoryNameWithOwner": "credfeto/credfeto-github-api-proxy",
+        "branchName": "main"
+      },
+      "message": { "headline": "blocked commit attempt" },
+      "fileChanges": {},
+      "expectedHeadOid": "abc1234567890abcdef1234567890abcdef123456"
+    }
+  }
+}
+
+###
+
+### BLOCKED: GraphQL mutation createRef (create a branch)
+# Expected: 403 {"message":"Operation blocked by proxy policy",...}
+POST {{proxyHost}}/graphql
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "query": "mutation CreateRef($input: CreateRefInput!) { createRef(input: $input) { ref { name } } }",
+  "variables": {
+    "input": {
+      "repositoryId": "R_kgDOABCDEF",
+      "name": "refs/heads/blocked-branch",
+      "oid": "abc1234567890abcdef1234567890abcdef123456"
+    }
+  }
+}
+
+###############################################################################
+# Authentication failures
+###############################################################################
+
+### No Authorization header — proxy returns 401
+# Expected: 401 {"message":"Authorization header required"}
+GET {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/issues
+
+###
+
+### Invalid proxy token — proxy returns 401
+# Expected: 401 {"message":"Invalid proxy token"}
+GET {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/issues
+Authorization: Bearer invalid-token-that-does-not-match-any-credential

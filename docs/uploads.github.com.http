@@ -1,0 +1,27 @@
+# uploads.github.com – upstream GitHub uploads API consumed by this proxy
+#
+# The proxy forwards any request whose path starts with /uploads to
+# uploads.github.com.  This endpoint is used for release asset uploads and
+# other binary content operations.
+#
+# All requests here bypass the proxy and talk directly to GitHub.
+#
+# Prerequisites:
+#   Set @githubPat to a valid GitHub Personal Access Token.
+#   Replace :release_id and :owner/:repo with real values.
+
+@uploadsHost = https://uploads.github.com
+@githubPat = your-github-pat-here
+
+###############################################################################
+# Release asset upload (forwarded from proxy /uploads/…)
+###############################################################################
+
+### Upload a release asset
+# Replace :owner, :repo, :release_id, and the binary body with real values.
+# Expected: 201 with the created asset object
+# Note: this endpoint accepts arbitrary binary content; update Content-Type
+# and the body to match the file being uploaded.
+POST {{uploadsHost}}/repos/:owner/:repo/releases/:release_id/assets?name=example.zip
+Authorization: token {{githubPat}}
+Content-Type: application/zip
