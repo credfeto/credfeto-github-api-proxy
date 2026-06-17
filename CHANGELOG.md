@@ -18,6 +18,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - GitHub Actions workflow for Docker image build and publish
 - Support for multiple credential pairs via credentials.json array, replacing single-pair env var approach
 - Automated tests covering all startup paths, auth failure modes, and EACCES/EPERM permission errors
+- Added .http test files for proxy-exposed endpoints and consumed GitHub APIs (api.github.com, uploads.github.com)
 ### Fixed
 - Automatically populate headRepositoryId in createPullRequest GraphQL mutations when omitted, preventing PR creation failures when gh CLI uses a non-github.com GH_HOST
 - Accept /api/v3/ prefix that gh CLI prepends for non-github.com hosts
