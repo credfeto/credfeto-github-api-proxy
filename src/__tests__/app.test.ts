@@ -288,6 +288,67 @@ describe("Request logging", () => {
   });
 });
 
+// ── Actions API forwarding (gh run view) ─────────────────────────────────────
+// Regression coverage for issue #27: `gh run view --log-failed` and
+// `gh run view --json jobs` were reported as returning HTTP 404.
+// These tests confirm the proxy forwards both endpoints without blocking them
+// and that the /api/v3/ prefix is stripped correctly before forwarding.
+
+describe("Actions API forwarding (gh run view)", () => {
+  const app = createApp(CREDENTIALS);
+  const mockForward = vi.mocked(forwardToGitHub);
+
+  beforeEach(() => {
+    mockForward.mockClear();
+  });
+
+  it.each<{ label: string; url: string; expectedUrl: string }>([
+    {
+      label: "direct path",
+      url: "/repos/alice/myrepo/actions/runs/12345/jobs?per_page=100",
+      expectedUrl: "/repos/alice/myrepo/actions/runs/12345/jobs?per_page=100",
+    },
+    {
+      label: "/api/v3 prefix",
+      url: "/api/v3/repos/alice/myrepo/actions/runs/12345/jobs?per_page=100",
+      expectedUrl: "/repos/alice/myrepo/actions/runs/12345/jobs?per_page=100",
+    },
+  ])("forwards GET /repos/…/actions/runs/:run_id/jobs via $label and preserves query string", async ({ url, expectedUrl }) => {
+    const res = await request(app)
+      .get(url)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
+
+    expect(res.status).toBe(200);
+    expect(mockForward).toHaveBeenCalledOnce();
+    const forwarded = mockForward.mock.calls[0][0];
+    expect(forwarded.url).toBe(expectedUrl);
+    expect(forwarded.method).toBe("GET");
+  });
+
+  it.each<{ label: string; url: string; expectedUrl: string }>([
+    {
+      label: "direct path",
+      url: "/repos/alice/myrepo/actions/jobs/67890/logs",
+      expectedUrl: "/repos/alice/myrepo/actions/jobs/67890/logs",
+    },
+    {
+      label: "/api/v3 prefix",
+      url: "/api/v3/repos/alice/myrepo/actions/jobs/67890/logs",
+      expectedUrl: "/repos/alice/myrepo/actions/jobs/67890/logs",
+    },
+  ])("forwards GET /repos/…/actions/jobs/:job_id/logs via $label", async ({ url, expectedUrl }) => {
+    const res = await request(app)
+      .get(url)
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
+
+    expect(res.status).toBe(200);
+    expect(mockForward).toHaveBeenCalledOnce();
+    const forwarded = mockForward.mock.calls[0][0];
+    expect(forwarded.url).toBe(expectedUrl);
+    expect(forwarded.method).toBe("GET");
+  });
+});
+
 // ── createPullRequest headRepositoryId transform ──────────────────────────────
 
 const CREATE_PR_MUTATION = `mutation CreatePullRequest($input: CreatePullRequestInput!) {
