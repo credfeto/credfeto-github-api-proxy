@@ -34,20 +34,12 @@ parserOptions:
 ###########
 plugins:
   - '@typescript-eslint'
+  - 'n'
 
 #########
 # Rules #
 #########
-rules: {}
-
-############
-# Overrides #
-############
-overrides:
-  - files:
-      - "**/__tests__/**/*.ts"
-      - "**/*.test.ts"
-      - "**/*.spec.ts"
-    rules:
-      n/no-missing-import: "off"
-      n/no-unpublished-import: "off"
+# super-linter runs without node_modules; these rules always produce false positives
+rules:
+  n/no-missing-import: "off"
+  n/no-unpublished-import: "off"
