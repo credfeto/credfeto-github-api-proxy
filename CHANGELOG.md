@@ -19,6 +19,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - Support for multiple credential pairs via credentials.json array, replacing single-pair env var approach
 - Automated tests covering all startup paths, auth failure modes, and EACCES/EPERM permission errors
 - Added .http test files for proxy-exposed endpoints and consumed GitHub APIs (api.github.com, uploads.github.com)
+- Tests confirming proxy correctly forwards gh run view jobs and log endpoints (issue #27)
 ### Fixed
 - Automatically populate headRepositoryId in createPullRequest GraphQL mutations when omitted, preventing PR creation failures when gh CLI uses a non-github.com GH_HOST
 - Accept /api/v3/ prefix that gh CLI prepends for non-github.com hosts
@@ -29,6 +30,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - Resolved Vite CJS Node API deprecation warning in test output by upgrading vitest from 1.3.1 to 2.1.9 and renaming vitest.config.ts to vitest.config.mts to use native ESM module loading
 - Restored public npm registry fallback when NPM_REGISTRY is not configured
 - Restored NPM_REGISTRY guards and public-registry fallback in npm composite action so builds succeed when no private registry is configured
+- Fixed ESLint n/no-missing-import and n/no-unpublished-import false positives in super-linter by providing eslint.config.mjs (flat config format required by super-linter v8 / ESLint v9) that disables those rules; the previous .eslintrc.yml was silently ignored by super-linter v8
 ### Changed
 - Updated GitHub Actions to Node.js 24 compatible versions: actions/checkout@v6.0.3, docker/setup-buildx-action@v4.1.0, docker/build-push-action@v7.2.0
 - Build uses esbuild to produce a single-file bundle with no node_modules in the runtime image
