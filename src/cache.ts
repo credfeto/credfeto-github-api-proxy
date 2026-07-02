@@ -46,7 +46,7 @@ export function isCacheable(method: string, url: string, body: unknown): boolean
   if (typeof body !== "object" || body === null) return false;
   const query = (body as { query?: unknown }).query;
   if (typeof query !== "string") return false;
-  return !/\bmutation\b/i.test(query);
+  return !/\b(mutation|subscription)\b/i.test(query);
 }
 
 export class ResponseCache {
