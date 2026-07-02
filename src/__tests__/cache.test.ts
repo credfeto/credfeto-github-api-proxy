@@ -12,6 +12,8 @@ describe("isCacheable", () => {
     { method: "POST", url: "/graphql", body: { query: "query ListIssues { repository { issues { nodes { number } } } }" }, expected: true, label: "POST /graphql named query" },
     { method: "POST", url: "/graphql", body: { query: "  query { viewer { login } }" }, expected: true, label: "POST /graphql query with leading whitespace" },
     { method: "POST", url: "/graphql?foo=bar", body: { query: "query { viewer { login } }" }, expected: true, label: "POST /graphql with query string (full URL is cache key)" },
+    { method: "POST", url: "/graphql", body: { query: 'query { findMutationTests { id } }' }, expected: true, label: "POST /graphql query containing 'mutation' inside a field name" },
+    { method: "POST", url: "/graphql", body: { query: 'query { items(filter: "mutation test") { id } }' }, expected: true, label: "POST /graphql query containing 'mutation' as a string literal value" },
   ])("$label is cacheable", ({ method, url, body, expected }) => {
     expect(isCacheable(method, url, body)).toBe(expected);
   });
