@@ -23,7 +23,14 @@ export class InMemoryETagStore implements IETagStore {
 export class InMemoryResponseCache implements IResponseCache {
   private readonly store = new Map<string, { response: CachedResponse; expiresAt: number }>();
 
-  constructor(private readonly ttlMs: number = 60_000) {}
+  constructor(private readonly ttlMs: number = 60_000) {
+    setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this.store) {
+        if (now > entry.expiresAt) this.store.delete(key);
+      }
+    }, ttlMs).unref();
+  }
 
   get(key: string): CachedResponse | undefined {
     const entry = this.store.get(key);
