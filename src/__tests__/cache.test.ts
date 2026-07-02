@@ -19,6 +19,8 @@ describe("isCacheable", () => {
   it.each([
     { method: "POST", url: "/graphql", body: { query: "mutation { createIssue(input:{}) { issue { number } } }" }, label: "POST /graphql mutation" },
     { method: "POST", url: "/graphql", body: { query: "  mutation CreateIssue { createIssue(input:{}) { issue { number } } }" }, label: "POST /graphql mutation with leading whitespace" },
+    { method: "POST", url: "/graphql", body: { query: "subscription { onIssueAdded { number } }" }, label: "POST /graphql subscription" },
+    { method: "POST", url: "/graphql", body: { query: "  subscription OnIssueAdded { onIssueAdded { number } }" }, label: "POST /graphql subscription with leading whitespace" },
     { method: "POST", url: "/repos/alice/myrepo/issues", body: { title: "bug" }, label: "POST to REST endpoint" },
     { method: "PATCH", url: "/repos/alice/myrepo/issues/1", body: { state: "closed" }, label: "PATCH" },
     { method: "DELETE", url: "/repos/alice/myrepo/issues/1", body: undefined, label: "DELETE" },
