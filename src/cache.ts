@@ -1,5 +1,16 @@
 import crypto from "crypto";
 
+function sortJsonKeys(val: unknown): unknown {
+  if (val === null || typeof val !== "object") return val;
+  if (Array.isArray(val)) return val.map(sortJsonKeys);
+  const obj = val as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const k of Object.keys(obj).sort()) {
+    result[k] = sortJsonKeys(obj[k]);
+  }
+  return result;
+}
+
 export interface CachedResponse {
   statusCode: number;
   headers: Record<string, string | string[] | undefined>;
@@ -29,7 +40,7 @@ export function hashBody(body: unknown): string {
   } else if (typeof body === "string") {
     data = Buffer.from(body, "utf8");
   } else {
-    data = Buffer.from(JSON.stringify(body), "utf8");
+    data = Buffer.from(JSON.stringify(sortJsonKeys(body)), "utf8");
   }
   return crypto.createHash("sha256").update(data).digest("hex");
 }
