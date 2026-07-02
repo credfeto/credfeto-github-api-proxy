@@ -56,6 +56,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     ...req.headers,
     host: targetHost,
     "user-agent": req.headers["user-agent"] ?? "github-api-proxy/1.0",
+    "if-none-match": undefined,
     "x-forwarded-for": undefined,
     "x-forwarded-host": undefined,
     "x-forwarded-proto": undefined,
