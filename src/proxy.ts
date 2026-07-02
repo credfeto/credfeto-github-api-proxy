@@ -96,18 +96,21 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
       proxyRes.on("data", (chunk: Buffer) => { chunks.push(chunk); });
       proxyRes.on("end", () => {
         const body = Buffer.concat(chunks);
+        const statusCode = proxyRes.statusCode ?? 200;
         const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
         const responseHeaders: Record<string, string | string[] | undefined> = {
           ...(proxyRes.headers as Record<string, string | string[] | undefined>),
         };
         delete responseHeaders["transfer-encoding"];
         const cachedResponse: CachedResponse = {
-          statusCode: proxyRes.statusCode ?? 200,
+          statusCode,
           headers: responseHeaders,
           body,
         };
-        responseCache.store(cacheKey!, cachedResponse, etag);
-        res.writeHead(proxyRes.statusCode ?? 200, { ...responseHeaders, "content-length": body.length });
+        if (statusCode >= 200 && statusCode < 300) {
+          responseCache.store(cacheKey!, cachedResponse, etag);
+        }
+        res.writeHead(statusCode, { ...responseHeaders, "content-length": body.length });
         res.end(body);
       });
       proxyRes.on("error", (err: Error) => {
