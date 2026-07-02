@@ -32,7 +32,12 @@ export interface IResponseCache {
 }
 
 export function hashBody(body: unknown): string {
+  return serializeBody(body).hash;
+}
+
+export function serializeBody(body: unknown): { hash: string; json: string | undefined } {
   let data: Buffer;
+  let json: string | undefined;
   if (body === undefined || body === null) {
     data = Buffer.alloc(0);
   } else if (Buffer.isBuffer(body)) {
@@ -40,9 +45,10 @@ export function hashBody(body: unknown): string {
   } else if (typeof body === "string") {
     data = Buffer.from(body, "utf8");
   } else {
-    data = Buffer.from(JSON.stringify(sortJsonKeys(body)), "utf8");
+    json = JSON.stringify(sortJsonKeys(body));
+    data = Buffer.from(json, "utf8");
   }
-  return crypto.createHash("sha256").update(data).digest("hex");
+  return { hash: crypto.createHash("sha256").update(data).digest("hex"), json };
 }
 
 export function buildCacheKey(method: string, url: string, bodyHash: string, callerId: string): string {
