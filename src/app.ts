@@ -18,7 +18,11 @@ function extractGraphQLOp(req: Request): string | null {
 export function createApp(credentials: CredentialPair[]): express.Application {
   const app = express();
 
-  const ttlMs = parseInt(process.env.CACHE_TTL_SECONDS ?? "60", 10) * 1000;
+  const rawTtl = parseInt(process.env.CACHE_TTL_SECONDS ?? "60", 10);
+  if (!Number.isFinite(rawTtl) || rawTtl < 0) {
+    throw new Error(`Invalid CACHE_TTL_SECONDS: "${process.env.CACHE_TTL_SECONDS ?? ""}"`);
+  }
+  const ttlMs = rawTtl * 1000;
   const responseCache = new ResponseCache(new InMemoryETagStore(), new InMemoryResponseCache(ttlMs));
 
   // ── Normalise Enterprise-shaped paths to github.com equivalents ──────────
