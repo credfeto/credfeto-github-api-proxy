@@ -148,6 +148,7 @@ describe("forwardToGitHub — no ResponseCache", () => {
     expect(upstream.getOptions()?.hostname).toBe("uploads.github.com");
   });
 
+
   it("writes JSON body and ends request for application/json", async () => {
     const body = { query: "mutation { x }" };
     const req = makeRequest({ method: "POST", url: "/graphql", body, isJson: true });
