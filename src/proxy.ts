@@ -124,6 +124,12 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     }
 
     // ── Default: pipe through ────────────────────────────────────────────
+    proxyRes.on("error", (err: Error) => {
+      console.error("Proxy upstream error:", err.message);
+      if (!res.headersSent) {
+        res.status(502).json({ message: "Bad gateway" });
+      }
+    });
     res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
     proxyRes.pipe(res, { end: true });
   });
