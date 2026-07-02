@@ -2,6 +2,13 @@ import type { Request, Response } from "express";
 import https from "https";
 import http from "http";
 import { URL } from "url";
+import {
+  type ResponseCache,
+  type CachedResponse,
+  isCacheable,
+  hashBody,
+  buildCacheKey,
+} from "./cache.js";
 
 const GITHUB_API_HOST = "api.github.com";
 const GITHUB_UPLOADS_HOST = "uploads.github.com";
@@ -12,12 +19,38 @@ const GITHUB_UPLOADS_HOST = "uploads.github.com";
  * We do a manual proxy rather than http-proxy-middleware so we can:
  *  1. Modify headers (the auth swap has already happened in middleware)
  *  2. Cleanly handle body parsing for JSON (needed for GraphQL inspection)
+ *  3. Intercept responses to implement ETag / short-TTL caching
  */
-export function forwardToGitHub(req: Request, res: Response): void {
+export function forwardToGitHub(req: Request, res: Response, responseCache?: ResponseCache): void {
   const targetHost =
     req.path.startsWith("/uploads") ? GITHUB_UPLOADS_HOST : GITHUB_API_HOST;
 
   const targetUrl = new URL(`https://${targetHost}${req.url}`);
+  const callerId: string = typeof res.locals.callerId === "string" ? res.locals.callerId : "";
+
+  // ── Caching: check for a live cache hit ─────────────────────────────────
+  let cacheKey: string | undefined;
+
+  if (responseCache !== undefined && isCacheable(req.method, req.url, req.body)) {
+    const bodyHash = hashBody(req.body);
+    cacheKey = buildCacheKey(req.method, req.url, bodyHash, callerId);
+
+    const cached = responseCache.getCachedResponse(cacheKey);
+    if (cached !== undefined) {
+      const replyHeaders: Record<string, string | string[] | number | undefined> = {
+        ...cached.headers,
+        "content-length": cached.body.length,
+      };
+      delete replyHeaders["transfer-encoding"];
+      res.writeHead(cached.statusCode, replyHeaders);
+      res.end(cached.body);
+      return;
+    }
+  }
+
+  // If we have a stored ETag for this key, send it as If-None-Match so GitHub
+  // can return 304 (which does not consume rate-limit quota).
+  const etagEntry = cacheKey !== undefined ? responseCache?.getETagEntry(cacheKey) : undefined;
 
   const headers: http.OutgoingHttpHeaders = {
     ...req.headers,
@@ -27,6 +60,10 @@ export function forwardToGitHub(req: Request, res: Response): void {
     "x-forwarded-host": undefined,
     "x-forwarded-proto": undefined,
   };
+
+  if (etagEntry !== undefined) {
+    headers["if-none-match"] = etagEntry.etag;
+  }
 
   // Remove undefined entries
   for (const key of Object.keys(headers)) {
@@ -41,6 +78,48 @@ export function forwardToGitHub(req: Request, res: Response): void {
   };
 
   const proxyReq = https.request(options, (proxyRes) => {
+    // ── 304 Not Modified: replay the previously cached body ──────────────
+    if (proxyRes.statusCode === 304 && etagEntry !== undefined) {
+      const replyHeaders: Record<string, string | string[] | number | undefined> = {
+        ...etagEntry.headers,
+        "content-length": etagEntry.body.length,
+      };
+      delete replyHeaders["transfer-encoding"];
+      res.writeHead(200, replyHeaders);
+      res.end(etagEntry.body);
+      return;
+    }
+
+    // ── Cacheable response: buffer so we can store it ────────────────────
+    if (cacheKey !== undefined && responseCache !== undefined) {
+      const chunks: Buffer[] = [];
+      proxyRes.on("data", (chunk: Buffer) => { chunks.push(chunk); });
+      proxyRes.on("end", () => {
+        const body = Buffer.concat(chunks);
+        const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
+        const responseHeaders: Record<string, string | string[] | undefined> = {
+          ...(proxyRes.headers as Record<string, string | string[] | undefined>),
+        };
+        delete responseHeaders["transfer-encoding"];
+        const cachedResponse: CachedResponse = {
+          statusCode: proxyRes.statusCode ?? 200,
+          headers: responseHeaders,
+          body,
+        };
+        responseCache.store(cacheKey!, cachedResponse, etag);
+        res.writeHead(proxyRes.statusCode ?? 200, { ...responseHeaders, "content-length": body.length });
+        res.end(body);
+      });
+      proxyRes.on("error", (err: Error) => {
+        console.error("Proxy upstream error:", err.message);
+        if (!res.headersSent) {
+          res.status(502).json({ message: "Bad gateway", detail: err.message });
+        }
+      });
+      return;
+    }
+
+    // ── Default: pipe through ────────────────────────────────────────────
     res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
     proxyRes.pipe(res, { end: true });
   });

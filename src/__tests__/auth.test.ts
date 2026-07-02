@@ -10,9 +10,10 @@ function makeReq(authHeader?: string): Partial<Request> {
   return { headers: authHeader ? { authorization: authHeader } : {} };
 }
 
-function makeRes(): { status: ReturnType<typeof vi.fn>; json: ReturnType<typeof vi.fn>; _statusCode: number } {
+function makeRes(): { status: ReturnType<typeof vi.fn>; json: ReturnType<typeof vi.fn>; _statusCode: number; locals: Record<string, unknown> } {
   const res = {
     _statusCode: 0,
+    locals: {} as Record<string, unknown>,
     status: vi.fn().mockReturnThis(),
     json: vi.fn().mockReturnThis(),
   };
@@ -98,5 +99,23 @@ describe("createAuthMiddleware", () => {
     mw(req as Request, res as unknown as Response, next as NextFunction);
     expect(next).toHaveBeenCalledOnce();
     expect((req as Request).headers["authorization"]).toBe(`token ${PAIR_1.githubPat}`);
+  });
+
+  it("records the proxy token as res.locals.callerId before swapping", () => {
+    const mw = createAuthMiddleware(CREDENTIALS);
+    const req = makeReq(`Bearer ${PAIR_1.proxyToken}`);
+    const res = makeRes();
+    const next = vi.fn();
+    mw(req as Request, res as unknown as Response, next as NextFunction);
+    expect(res.locals.callerId).toBe(PAIR_1.proxyToken);
+  });
+
+  it("records PAIR_2 proxyToken as callerId when that pair is matched", () => {
+    const mw = createAuthMiddleware(CREDENTIALS);
+    const req = makeReq(`Bearer ${PAIR_2.proxyToken}`);
+    const res = makeRes();
+    const next = vi.fn();
+    mw(req as Request, res as unknown as Response, next as NextFunction);
+    expect(res.locals.callerId).toBe(PAIR_2.proxyToken);
   });
 });
