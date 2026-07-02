@@ -1,14 +1,22 @@
 import type { IETagStore, IResponseCache, CachedResponse, ETagEntry } from "./cache.js";
 
 export class InMemoryETagStore implements IETagStore {
-  private readonly store = new Map<string, ETagEntry>();
+  private readonly store = new Map<string, { entry: ETagEntry; expiresAt: number }>();
+
+  constructor(private readonly ttlMs: number = 86_400_000) {}
 
   get(key: string): ETagEntry | undefined {
-    return this.store.get(key);
+    const record = this.store.get(key);
+    if (record === undefined) return undefined;
+    if (Date.now() > record.expiresAt) {
+      this.store.delete(key);
+      return undefined;
+    }
+    return record.entry;
   }
 
   set(key: string, entry: ETagEntry): void {
-    this.store.set(key, entry);
+    this.store.set(key, { entry, expiresAt: Date.now() + this.ttlMs });
   }
 }
 
