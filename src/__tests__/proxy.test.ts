@@ -308,6 +308,35 @@ describe("forwardToGitHub — 304 Not Modified replay", () => {
     expect(res._body).toStrictEqual(originalBody);
   });
 
+  it("replays the original status code (not hardcoded 200) when upstream returns 304", async () => {
+    const originalBody = Buffer.from('{"accepted":true}');
+    const etagEntry: ETagEntry = {
+      etag: '"etag-v2"',
+      statusCode: 202,
+      headers: { "content-type": "application/json" },
+      body: originalBody,
+    };
+    const cache = makeCache({
+      getCachedResponse: vi.fn().mockReturnValue(undefined),
+      getETagEntry: vi.fn().mockReturnValue(etagEntry),
+    });
+    const req = makeRequest({});
+    const res = makeResponse();
+
+    vi.spyOn(https, "request").mockImplementationOnce((_options, callback) => {
+      const fakeRes = Object.assign(new EventEmitter(), { statusCode: 304, headers: {}, resume: vi.fn() }) as unknown as IncomingMessage;
+      process.nextTick(() => { if (callback) callback(fakeRes); });
+      return Object.assign(new EventEmitter(), { setHeader: vi.fn(), write: vi.fn(), end: vi.fn() }) as unknown as ClientRequest;
+    });
+
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    expect(res._statusCode).toBe(202);
+    expect(res._body).toStrictEqual(originalBody);
+  });
+
   it("strips transfer-encoding when replaying 304", async () => {
     const originalBody = Buffer.from("data");
     const etagEntry: ETagEntry = {

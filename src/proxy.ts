@@ -87,9 +87,9 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         "content-length": etagEntry.body.length,
       };
       delete replyHeaders["transfer-encoding"];
-      res.writeHead(200, replyHeaders);
+      res.writeHead(etagEntry.statusCode, replyHeaders);
       res.end(etagEntry.body);
-      proxyRes.on("error", () => { /* connection error after 304 replay — already replied */ });
+      proxyRes.on("error", (err: Error) => { console.error("Proxy upstream error (after 304 replay):", err.message); });
       proxyRes.resume();
       return;
     }
