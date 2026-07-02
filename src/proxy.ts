@@ -118,7 +118,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
       proxyRes.on("error", (err: Error) => {
         console.error("Proxy upstream error:", err.message);
         if (!res.headersSent) {
-          res.status(502).json({ message: "Bad gateway", detail: err.message });
+          res.status(502).json({ message: "Bad gateway" });
         }
       });
       return;
@@ -138,7 +138,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   proxyReq.on("error", (err) => {
     console.error("Proxy upstream error:", err.message);
     if (!res.headersSent) {
-      res.status(502).json({ message: "Bad gateway", detail: err.message });
+      res.status(502).json({ message: "Bad gateway" });
     }
   });
 
