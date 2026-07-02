@@ -103,9 +103,34 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     const isJsonResponse = contentType.includes("application/json") || contentType.includes("application/graphql");
 
     if (cacheKey !== undefined && responseCache !== undefined && isJsonResponse) {
+      const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
+      let totalBuffered = 0;
+      let overflowed = false;
       const chunks: Buffer[] = [];
-      proxyRes.on("data", (chunk: Buffer) => { chunks.push(chunk); });
+      proxyRes.on("data", (chunk: Buffer) => {
+        if (overflowed) {
+          res.write(chunk);
+          return;
+        }
+        totalBuffered += chunk.length;
+        if (totalBuffered > MAX_BUFFER_BYTES) {
+          // Too large to cache: flush buffered data directly and stop accumulating
+          overflowed = true;
+          const overflowHeaders = { ...(proxyRes.headers as Record<string, string | string[] | undefined>) };
+          delete overflowHeaders["transfer-encoding"];
+          res.writeHead(proxyRes.statusCode ?? 502, overflowHeaders);
+          for (const c of chunks) res.write(c);
+          chunks.length = 0;
+          res.write(chunk);
+          return;
+        }
+        chunks.push(chunk);
+      });
       proxyRes.on("end", () => {
+        if (overflowed) {
+          res.end();
+          return;
+        }
         const body = Buffer.concat(chunks);
         const statusCode = proxyRes.statusCode ?? 200;
         const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
