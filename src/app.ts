@@ -23,7 +23,8 @@ export function createApp(credentials: CredentialPair[]): express.Application {
     throw new Error(`Invalid CACHE_TTL_SECONDS: "${process.env.CACHE_TTL_SECONDS ?? ""}"`);
   }
   const ttlMs = rawTtl * 1000;
-  const responseCache = new ResponseCache(new InMemoryETagStore(ttlMs), new InMemoryResponseCache(ttlMs));
+  const etagTtlMs = Math.max(ttlMs, 86_400_000);
+  const responseCache = new ResponseCache(new InMemoryETagStore(etagTtlMs), new InMemoryResponseCache(ttlMs));
 
   // ── Normalise Enterprise-shaped paths to github.com equivalents ──────────
   //
