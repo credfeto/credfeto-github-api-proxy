@@ -94,7 +94,14 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     }
 
     // ── Cacheable response: buffer so we can store it ────────────────────
-    if (cacheKey !== undefined && responseCache !== undefined) {
+    // Only buffer JSON responses — binary downloads (release assets, etc.) must
+    // be piped to avoid loading arbitrarily large bodies into heap.
+    const contentType = typeof proxyRes.headers["content-type"] === "string"
+      ? proxyRes.headers["content-type"]
+      : "";
+    const isJsonResponse = contentType.includes("application/json") || contentType.includes("application/graphql");
+
+    if (cacheKey !== undefined && responseCache !== undefined && isJsonResponse) {
       const chunks: Buffer[] = [];
       proxyRes.on("data", (chunk: Buffer) => { chunks.push(chunk); });
       proxyRes.on("end", () => {
