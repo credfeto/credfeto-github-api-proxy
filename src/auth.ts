@@ -41,7 +41,9 @@ export function createAuthMiddleware(credentials: CredentialPair[]) {
       return;
     }
 
-    // Swap in the real PAT for the matched credential pair
+    // Swap in the real PAT for the matched credential pair; record caller identity
+    // for downstream cache key construction before the real token is in scope.
+    res.locals.callerId = presented;
     req.headers["authorization"] = `token ${credential.githubPat}`;
     next();
   };
