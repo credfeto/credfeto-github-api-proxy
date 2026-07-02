@@ -83,6 +83,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     if (proxyRes.statusCode === 304 && etagEntry !== undefined) {
       const replyHeaders: Record<string, string | string[] | number | undefined> = {
         ...etagEntry.headers,
+        ...proxyRes.headers,  // 304 headers (e.g. updated rate-limit) override stale stored values
         "content-length": etagEntry.body.length,
       };
       delete replyHeaders["transfer-encoding"];
