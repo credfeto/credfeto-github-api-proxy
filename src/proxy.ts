@@ -6,7 +6,7 @@ import {
   type ResponseCache,
   type CachedResponse,
   isCacheable,
-  hashBody,
+  serializeBody,
   buildCacheKey,
 } from "./cache.js";
 
@@ -30,9 +30,11 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
 
   // ── Caching: check for a live cache hit ─────────────────────────────────
   let cacheKey: string | undefined;
+  let preSerialisedBody: string | undefined;
 
   if (responseCache !== undefined && isCacheable(req.method, req.url, req.body)) {
-    const bodyHash = hashBody(req.body);
+    const { hash: bodyHash, json } = serializeBody(req.body);
+    preSerialisedBody = json;
     cacheKey = buildCacheKey(req.method, req.url, bodyHash, callerId);
 
     const cached = responseCache.getCachedResponse(cacheKey);
@@ -180,7 +182,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   // other paths we pipe the raw stream.  We need to reconstruct the body for
   // GraphQL since express consumed it.
   if (req.is("application/json") && req.body !== undefined) {
-    const serialised = JSON.stringify(req.body);
+    const serialised = preSerialisedBody ?? JSON.stringify(req.body);
     proxyReq.setHeader("content-length", Buffer.byteLength(serialised));
     proxyReq.write(serialised);
     proxyReq.end();
