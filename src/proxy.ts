@@ -25,7 +25,13 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   const targetHost =
     req.path.startsWith("/uploads") ? GITHUB_UPLOADS_HOST : GITHUB_API_HOST;
 
-  const targetUrl = new URL(`https://${targetHost}${req.url}`);
+  let targetUrl: URL;
+  try {
+    targetUrl = new URL(`https://${targetHost}${req.url}`);
+  } catch {
+    res.status(400).json({ message: "Bad request: invalid URL path" });
+    return;
+  }
   const callerId: string = typeof res.locals.callerId === "string" ? res.locals.callerId : "";
 
   // ── Caching: check for a live cache hit ─────────────────────────────────
