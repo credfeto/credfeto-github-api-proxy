@@ -295,7 +295,7 @@ describe("forwardToGitHub — 304 Not Modified replay", () => {
     const res = makeResponse();
 
     vi.spyOn(https, "request").mockImplementationOnce((_options, callback) => {
-      const fakeRes = Object.assign(new EventEmitter(), { statusCode: 304, headers: {} }) as unknown as IncomingMessage;
+      const fakeRes = Object.assign(new EventEmitter(), { statusCode: 304, headers: {}, resume: vi.fn() }) as unknown as IncomingMessage;
       process.nextTick(() => { if (callback) callback(fakeRes); });
       return Object.assign(new EventEmitter(), { setHeader: vi.fn(), write: vi.fn(), end: vi.fn() }) as unknown as ClientRequest;
     });
@@ -324,7 +324,7 @@ describe("forwardToGitHub — 304 Not Modified replay", () => {
     const res = makeResponse();
 
     vi.spyOn(https, "request").mockImplementationOnce((_options, callback) => {
-      const fakeRes = Object.assign(new EventEmitter(), { statusCode: 304, headers: {} }) as unknown as IncomingMessage;
+      const fakeRes = Object.assign(new EventEmitter(), { statusCode: 304, headers: {}, resume: vi.fn() }) as unknown as IncomingMessage;
       process.nextTick(() => { if (callback) callback(fakeRes); });
       return Object.assign(new EventEmitter(), { setHeader: vi.fn(), write: vi.fn(), end: vi.fn() }) as unknown as ClientRequest;
     });

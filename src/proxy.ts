@@ -88,6 +88,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
       delete replyHeaders["transfer-encoding"];
       res.writeHead(200, replyHeaders);
       res.end(etagEntry.body);
+      proxyRes.resume();
       return;
     }
 
