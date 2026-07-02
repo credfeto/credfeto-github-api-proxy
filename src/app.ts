@@ -19,11 +19,11 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   const app = express();
 
   const rawTtl = parseInt(process.env.CACHE_TTL_SECONDS ?? "60", 10);
-  if (!Number.isFinite(rawTtl) || rawTtl < 0) {
+  if (!Number.isFinite(rawTtl) || rawTtl < 1) {
     throw new Error(`Invalid CACHE_TTL_SECONDS: "${process.env.CACHE_TTL_SECONDS ?? ""}"`);
   }
   const ttlMs = rawTtl * 1000;
-  const responseCache = new ResponseCache(new InMemoryETagStore(), new InMemoryResponseCache(ttlMs));
+  const responseCache = new ResponseCache(new InMemoryETagStore(ttlMs), new InMemoryResponseCache(ttlMs));
 
   // ── Normalise Enterprise-shaped paths to github.com equivalents ──────────
   //
