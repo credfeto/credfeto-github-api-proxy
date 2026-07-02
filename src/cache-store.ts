@@ -19,7 +19,11 @@ export class InMemoryResponseCache implements IResponseCache {
 
   get(key: string): CachedResponse | undefined {
     const entry = this.store.get(key);
-    if (entry === undefined || Date.now() > entry.expiresAt) return undefined;
+    if (entry === undefined) return undefined;
+    if (Date.now() > entry.expiresAt) {
+      this.store.delete(key);
+      return undefined;
+    }
     return entry.response;
   }
 
