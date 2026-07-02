@@ -57,6 +57,30 @@ describe("InMemoryETagStore", () => {
     expect(result?.headers).toStrictEqual(SAMPLE_HEADERS);
     expect(result?.statusCode).toBe(SAMPLE_STATUS);
   });
+
+  it("returns undefined after the TTL has expired", () => {
+    vi.useFakeTimers();
+    try {
+      const store = new InMemoryETagStore(1_000);
+      store.set("k", SAMPLE_ETAG_ENTRY);
+      vi.advanceTimersByTime(1_001);
+      expect(store.get("k")).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns the entry before the TTL has expired", () => {
+    vi.useFakeTimers();
+    try {
+      const store = new InMemoryETagStore(1_000);
+      store.set("k", SAMPLE_ETAG_ENTRY);
+      vi.advanceTimersByTime(999);
+      expect(store.get("k")).toStrictEqual(SAMPLE_ETAG_ENTRY);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ── InMemoryResponseCache ─────────────────────────────────────────────────────
