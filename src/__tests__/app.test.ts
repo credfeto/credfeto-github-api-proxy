@@ -349,6 +349,40 @@ describe("Actions API forwarding (gh run view)", () => {
   });
 });
 
+// ── CACHE_TTL_SECONDS validation ──────────────────────────────────────────────
+
+describe("createApp CACHE_TTL_SECONDS validation", () => {
+  const original = process.env.CACHE_TTL_SECONDS;
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.CACHE_TTL_SECONDS;
+    } else {
+      process.env.CACHE_TTL_SECONDS = original;
+    }
+  });
+
+  it("throws when CACHE_TTL_SECONDS is 0", () => {
+    process.env.CACHE_TTL_SECONDS = "0";
+    expect(() => createApp(CREDENTIALS)).toThrow("Invalid CACHE_TTL_SECONDS");
+  });
+
+  it("throws when CACHE_TTL_SECONDS exceeds 86400", () => {
+    process.env.CACHE_TTL_SECONDS = "86401";
+    expect(() => createApp(CREDENTIALS)).toThrow("Invalid CACHE_TTL_SECONDS");
+  });
+
+  it("accepts CACHE_TTL_SECONDS=86400 (upper bound)", () => {
+    process.env.CACHE_TTL_SECONDS = "86400";
+    expect(() => createApp(CREDENTIALS)).not.toThrow();
+  });
+
+  it("accepts CACHE_TTL_SECONDS=1 (lower bound)", () => {
+    process.env.CACHE_TTL_SECONDS = "1";
+    expect(() => createApp(CREDENTIALS)).not.toThrow();
+  });
+});
+
 // ── createPullRequest headRepositoryId transform ──────────────────────────────
 
 const CREATE_PR_MUTATION = `mutation CreatePullRequest($input: CreatePullRequestInput!) {

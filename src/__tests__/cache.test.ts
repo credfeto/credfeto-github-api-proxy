@@ -71,6 +71,12 @@ describe("hashBody", () => {
   it("Buffer and string of same content produce the same hash", () => {
     expect(hashBody("hello")).toBe(hashBody(Buffer.from("hello", "utf8")));
   });
+
+  it("does not throw on a deeply nested object (depth > 50)", () => {
+    let nested: unknown = { leaf: "value" };
+    for (let i = 0; i < 200; i++) nested = { child: nested };
+    expect(() => hashBody(nested)).not.toThrow();
+  });
 });
 
 // ── buildCacheKey ─────────────────────────────────────────────────────────────

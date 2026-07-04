@@ -1,12 +1,13 @@
 import crypto from "crypto";
 
-function sortJsonKeys(val: unknown): unknown {
+function sortJsonKeys(val: unknown, depth = 0): unknown {
+  if (depth > 50) return val;
   if (val === null || typeof val !== "object") return val;
-  if (Array.isArray(val)) return val.map(sortJsonKeys);
+  if (Array.isArray(val)) return val.map((v) => sortJsonKeys(v, depth + 1));
   const obj = val as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const k of Object.keys(obj).sort()) {
-    result[k] = sortJsonKeys(obj[k]);
+    result[k] = sortJsonKeys(obj[k], depth + 1);
   }
   return result;
 }
