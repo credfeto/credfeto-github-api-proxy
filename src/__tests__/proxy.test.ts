@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import type { Request, Response } from "express";
 import type { IncomingMessage, ClientRequest } from "http";
 import { EventEmitter } from "events";

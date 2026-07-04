@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { InMemoryETagStore, InMemoryResponseCache } from "../cache-store.js";
 import type { ETagEntry, CachedResponse } from "../cache.js";
 
