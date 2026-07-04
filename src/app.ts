@@ -19,7 +19,7 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   const app = express();
 
   const rawTtl = parseInt(process.env.CACHE_TTL_SECONDS ?? "60", 10);
-  if (!Number.isFinite(rawTtl) || rawTtl < 1) {
+  if (!Number.isFinite(rawTtl) || rawTtl < 1 || rawTtl > 86_400) {
     throw new Error(`Invalid CACHE_TTL_SECONDS: "${process.env.CACHE_TTL_SECONDS ?? ""}"`);
   }
   const ttlMs = rawTtl * 1000;
