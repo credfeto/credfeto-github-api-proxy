@@ -4,6 +4,8 @@ import { createAuthMiddleware, type CredentialPair } from "./auth.js";
 import { checkRestBlock, checkGraphQLBlock } from "./blocklist.js";
 import { forwardToGitHub } from "./proxy.js";
 import { transformCreatePullRequest } from "./transform.js";
+import { ResponseCache } from "./cache.js";
+import { InMemoryETagStore, InMemoryResponseCache } from "./cache-store.js";
 
 function extractGraphQLOp(req: Request): string | null {
   if (req.method !== "POST" || req.path !== "/graphql") return null;
@@ -15,6 +17,14 @@ function extractGraphQLOp(req: Request): string | null {
 
 export function createApp(credentials: CredentialPair[]): express.Application {
   const app = express();
+
+  const rawTtl = parseInt(process.env.CACHE_TTL_SECONDS ?? "60", 10);
+  if (!Number.isFinite(rawTtl) || rawTtl < 1 || rawTtl > 86_400) {
+    throw new Error(`Invalid CACHE_TTL_SECONDS: "${process.env.CACHE_TTL_SECONDS ?? ""}"`);
+  }
+  const ttlMs = rawTtl * 1000;
+  const etagTtlMs = Math.max(ttlMs, 86_400_000);
+  const responseCache = new ResponseCache(new InMemoryETagStore(etagTtlMs), new InMemoryResponseCache(ttlMs));
 
   // ── Normalise Enterprise-shaped paths to github.com equivalents ──────────
   //
@@ -112,7 +122,7 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   });
 
   // ── Forward everything else to GitHub ─────────────────────────────────────
-  app.all("*", forwardToGitHub);
+  app.all("*", (req: Request, res: Response) => { forwardToGitHub(req, res, responseCache); });
 
   return app;
 }
