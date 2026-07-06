@@ -60,6 +60,13 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   // can return 304 (which does not consume rate-limit quota).
   const etagEntry = cacheKey !== undefined ? responseCache?.getETagEntry(cacheKey) : undefined;
 
+  // Determine body disposition before building headers so we can strip conflicting transfer fields.
+  // express.json() parses application/json and sets req.body to the parsed object.
+  // express.raw({ type:"*/*" }) buffers everything else into req.body as a Buffer.
+  // Both consume the underlying stream, so piping req would send an empty body.
+  const isJsonBody = Boolean(req.is("application/json")) && req.body !== undefined && !Buffer.isBuffer(req.body);
+  const isBufferBody = !isJsonBody && Buffer.isBuffer(req.body) && (req.body as Buffer).length > 0;
+
   const headers: http.OutgoingHttpHeaders = {
     ...req.headers,
     host: targetHost,
@@ -68,6 +75,10 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     "x-forwarded-for": undefined,
     "x-forwarded-host": undefined,
     "x-forwarded-proto": undefined,
+    // When we re-serialise the body, remove transfer-encoding (RFC 7230 §3.3.2 forbids
+    // combining it with content-length) and the stale content-length from the original
+    // request (we will set the correct value after serialisation).
+    ...(isJsonBody || isBufferBody ? { "transfer-encoding": undefined, "content-length": undefined } : {}),
   };
 
   if (etagEntry !== undefined) {
@@ -184,13 +195,19 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     }
   });
 
-  // The body has already been parsed by express.json() for /graphql; for all
-  // other paths we pipe the raw stream.  We need to reconstruct the body for
-  // GraphQL since express consumed it.
-  if (req.is("application/json") && req.body !== undefined) {
+  // Write or pipe the request body.
+  // isJsonBody / isBufferBody were determined above; both paths write a known-length body
+  // directly so the correct content-length can be set (transfer-encoding was stripped from
+  // the outgoing headers above).  Only truly unmodified streams fall through to pipe.
+  if (isJsonBody) {
     const serialised = preSerialisedBody ?? JSON.stringify(req.body);
     proxyReq.setHeader("content-length", Buffer.byteLength(serialised));
     proxyReq.write(serialised);
+    proxyReq.end();
+  } else if (isBufferBody) {
+    const buf = req.body as Buffer;
+    proxyReq.setHeader("content-length", buf.length);
+    proxyReq.write(buf);
     proxyReq.end();
   } else {
     req.pipe(proxyReq, { end: true });

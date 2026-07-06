@@ -14,6 +14,7 @@ function makeRequest(opts: {
   path?: string;
   body?: unknown;
   isJson?: boolean;
+  extraHeaders?: Record<string, string>;
 }): Request {
   const method = opts.method ?? "GET";
   const url = opts.url ?? "/repos/alice/myrepo/issues";
@@ -21,7 +22,7 @@ function makeRequest(opts: {
     method,
     url,
     path: opts.path ?? url.split("?")[0],
-    headers: { "user-agent": "test-agent/1.0", authorization: "token ghp_real" },
+    headers: { "user-agent": "test-agent/1.0", authorization: "token ghp_real", ...opts.extraHeaders },
     body: opts.body,
     is: (type: string) => (opts.isJson && type === "application/json" && opts.body !== undefined ? type : false),
     pipe: vi.fn(),
@@ -494,5 +495,120 @@ describe("forwardToGitHub — callerId fallback", () => {
 
     expect(res._statusCode).toBe(200);
     expect(cache.store as ReturnType<typeof vi.fn>).toHaveBeenCalledOnce();
+  });
+});
+
+// ── Tests: Transfer-Encoding stripping (issue #44) ────────────────────────────
+
+describe("forwardToGitHub — Transfer-Encoding / Buffer-body (issue #44)", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("strips transfer-encoding from outgoing headers when re-serialising a JSON body", async () => {
+    const body = { title: "my PR", labels: ["AI-Work"] };
+    const req = makeRequest({
+      method: "PATCH",
+      url: "/repos/alice/myrepo/pulls/1",
+      body,
+      isJson: true,
+      extraHeaders: { "transfer-encoding": "chunked" },
+    });
+    const res = makeResponse();
+    let capturedHeaders: Record<string, unknown> | undefined;
+
+    vi.spyOn(https, "request").mockImplementationOnce((options, callback) => {
+      capturedHeaders = (options as https.RequestOptions).headers as Record<string, unknown>;
+      const fakeRes = Object.assign(new EventEmitter(), {
+        statusCode: 200,
+        headers: { "content-type": "application/json" },
+        pipe: vi.fn((dest: { end: (d?: Buffer) => void }) => { process.nextTick(() => { dest.end(Buffer.from("{}")); }); }),
+      }) as unknown as IncomingMessage;
+      const fakeReq = Object.assign(new EventEmitter(), { setHeader: vi.fn(), write: vi.fn(), end: vi.fn() }) as unknown as ClientRequest;
+      process.nextTick(() => { if (callback) { callback(fakeRes); process.nextTick(() => { fakeRes.emit("end"); }); } });
+      return fakeReq;
+    });
+
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    expect(capturedHeaders?.["transfer-encoding"]).toBeUndefined();
+    expect(capturedHeaders?.["authorization"]).toBe("token ghp_real");
+  });
+
+  it("does not add transfer-encoding to outgoing headers for a JSON body without it", async () => {
+    const body = { state: "closed" };
+    const req = makeRequest({ method: "PATCH", url: "/repos/alice/myrepo/issues/1", body, isJson: true });
+    const res = makeResponse();
+    let capturedHeaders: Record<string, unknown> | undefined;
+
+    vi.spyOn(https, "request").mockImplementationOnce((options, callback) => {
+      capturedHeaders = (options as https.RequestOptions).headers as Record<string, unknown>;
+      const fakeRes = Object.assign(new EventEmitter(), {
+        statusCode: 200,
+        headers: { "content-type": "application/json" },
+        pipe: vi.fn((dest: { end: (d?: Buffer) => void }) => { process.nextTick(() => { dest.end(Buffer.from("{}")); }); }),
+      }) as unknown as IncomingMessage;
+      const fakeReq = Object.assign(new EventEmitter(), { setHeader: vi.fn(), write: vi.fn(), end: vi.fn() }) as unknown as ClientRequest;
+      process.nextTick(() => { if (callback) { callback(fakeRes); process.nextTick(() => { fakeRes.emit("end"); }); } });
+      return fakeReq;
+    });
+
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    expect(capturedHeaders?.["transfer-encoding"]).toBeUndefined();
+  });
+
+  it("writes a Buffer body directly and strips transfer-encoding when express.raw() consumed the stream", async () => {
+    const rawBody = Buffer.from("raw-upload-data");
+    const req = makeRequest({
+      method: "POST",
+      url: "/repos/alice/myrepo/releases/1/assets",
+      body: rawBody,
+      isJson: false,
+      extraHeaders: { "transfer-encoding": "chunked" },
+    });
+    const res = makeResponse();
+    let capturedHeaders: Record<string, unknown> | undefined;
+    let writeArg: Buffer | undefined;
+    let endCalled = false;
+
+    vi.spyOn(https, "request").mockImplementationOnce((options, callback) => {
+      capturedHeaders = (options as https.RequestOptions).headers as Record<string, unknown>;
+      const fakeRes = Object.assign(new EventEmitter(), {
+        statusCode: 200,
+        headers: { "content-type": "application/json" },
+        pipe: vi.fn((dest: { end: (d?: Buffer) => void }) => { process.nextTick(() => { dest.end(Buffer.from("{}")); }); }),
+      }) as unknown as IncomingMessage;
+      const fakeReq = Object.assign(new EventEmitter(), {
+        setHeader: vi.fn(),
+        write: vi.fn((data: Buffer) => { writeArg = data; }),
+        end: vi.fn(() => { endCalled = true; }),
+      }) as unknown as ClientRequest;
+      process.nextTick(() => { if (callback) { callback(fakeRes); process.nextTick(() => { fakeRes.emit("end"); }); } });
+      return fakeReq;
+    });
+
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    expect(capturedHeaders?.["transfer-encoding"]).toBeUndefined();
+    expect(writeArg).toStrictEqual(rawBody);
+    expect(endCalled).toBe(true);
+    expect((req.pipe as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  it("falls through to pipe when req.body is an empty Buffer (no-body GET)", async () => {
+    const req = makeRequest({ method: "GET", url: "/repos/alice/myrepo/issues", body: Buffer.alloc(0) });
+    const res = makeResponse();
+    const upstream = mockUpstream({ statusCode: 200, body: '{"items":[]}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    expect((req.pipe as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
+    expect(upstream.getOptions()?.hostname).toBe("api.github.com");
   });
 });
