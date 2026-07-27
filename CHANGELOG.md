@@ -38,6 +38,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 ### Changed
 - Updated GitHub Actions to Node.js 24 compatible versions: actions/checkout@v6.0.3, docker/setup-buildx-action@v4.1.0, docker/build-push-action@v7.2.0
 - Build uses esbuild to produce a single-file bundle with no node_modules in the runtime image
+### Deprecated
 ### Removed
 ### Deployment Changes
 <!--
