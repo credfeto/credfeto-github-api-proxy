@@ -126,7 +126,8 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
       : "";
     const isJsonResponse = contentType.includes("application/json") || contentType.includes("application/graphql");
 
-    if (cacheKey !== undefined && responseCache !== undefined && isJsonResponse) {
+    const isCaching = cacheKey !== undefined && responseCache !== undefined;
+    if ((isCaching || isMetaRequest) && isJsonResponse) {
       const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
       let totalBuffered = 0;
       let overflowed = false;
@@ -163,13 +164,13 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
           ...(proxyRes.headers as Record<string, string | string[] | undefined>),
         };
         delete responseHeaders["transfer-encoding"];
-        const cachedResponse: CachedResponse = {
-          statusCode,
-          headers: responseHeaders,
-          body,
-        };
-        if (statusCode >= 200 && statusCode < 300) {
-          responseCache.store(cacheKey!, cachedResponse, etag);
+        if (isCaching && statusCode >= 200 && statusCode < 300) {
+          const cachedResponse: CachedResponse = {
+            statusCode,
+            headers: responseHeaders,
+            body,
+          };
+          responseCache!.store(cacheKey!, cachedResponse, etag);
         }
         res.writeHead(statusCode, { ...responseHeaders, "content-length": body.length });
         res.end(body);

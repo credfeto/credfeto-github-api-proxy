@@ -32,5 +32,6 @@ export function injectInstalledVersion(body: Buffer): Buffer {
     return body;
   }
 
-  return Buffer.from(JSON.stringify({ ...meta, installed_version: SYNTHETIC_INSTALLED_VERSION }), "utf8");
+  meta.installed_version = SYNTHETIC_INSTALLED_VERSION;
+  return Buffer.from(JSON.stringify(meta), "utf8");
 }

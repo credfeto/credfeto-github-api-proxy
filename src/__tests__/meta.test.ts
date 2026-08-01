@@ -25,18 +25,11 @@ describe("injectInstalledVersion", () => {
     expect(result.installed_version).toBe("3.15.0");
   });
 
-  it("returns malformed (non-JSON) bodies unchanged", () => {
-    const body = Buffer.from("not json", "utf8");
-    expect(injectInstalledVersion(body)).toBe(body);
-  });
-
-  it("returns non-object JSON bodies unchanged", () => {
-    const body = json(["a", "b"]);
-    expect(injectInstalledVersion(body)).toBe(body);
-  });
-
-  it("returns a JSON null body unchanged", () => {
-    const body = json(null);
+  it.each([
+    ["malformed (non-JSON)", Buffer.from("not json", "utf8")],
+    ["non-object JSON", json(["a", "b"])],
+    ["a JSON null", json(null)],
+  ])("returns %s bodies unchanged", (_label, body) => {
     expect(injectInstalledVersion(body)).toBe(body);
   });
 
