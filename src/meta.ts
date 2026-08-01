@@ -9,6 +9,9 @@
  * the case for real api.github.com/meta, since that field is GHES-only.
  */
 
+// gh CLI only needs a syntactically valid, recent-enough semver here — it never talks
+// to a real GHES instance through this proxy. Bump this if gh raises its minimum
+// supported GHES version and starts rejecting 3.30.0.
 const SYNTHETIC_INSTALLED_VERSION = "3.30.0";
 
 export function injectInstalledVersion(body: Buffer): Buffer {
