@@ -612,3 +612,63 @@ describe("forwardToGitHub — Transfer-Encoding / Buffer-body (issue #44)", () =
     expect(upstream.getOptions()?.hostname).toBe("api.github.com");
   });
 });
+
+// ── Tests: GET /meta installed_version injection (issue #47) ─────────────────
+
+describe("forwardToGitHub — GET /meta installed_version injection", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("injects installed_version into a /meta response that lacks it", async () => {
+    const cache = makeCache();
+    const req = makeRequest({ url: "/meta", path: "/meta" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, body: '{"verifiable_password_authentication":true}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as Record<string, unknown>;
+    expect(parsed.installed_version).toBe("3.30.0");
+    expect(parsed.verifiable_password_authentication).toBe(true);
+  });
+
+  it("does not touch installed_version when GitHub already supplies one", async () => {
+    const cache = makeCache();
+    const req = makeRequest({ url: "/meta", path: "/meta" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, body: '{"installed_version":"3.9.0"}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as Record<string, unknown>;
+    expect(parsed.installed_version).toBe("3.9.0");
+  });
+
+  it("stores the injected body in the cache so a later cache hit serves it too", async () => {
+    const cache = makeCache();
+    const req = makeRequest({ url: "/meta", path: "/meta" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, headers: { etag: '"meta-etag"' }, body: '{}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const [, storedResponse] = (cache.store as ReturnType<typeof vi.fn>).mock.calls[0] as [string, CachedResponse];
+    const parsed = JSON.parse(storedResponse.body.toString("utf8")) as Record<string, unknown>;
+    expect(parsed.installed_version).toBe("3.30.0");
+  });
+
+  it("does not inject installed_version into non-/meta GET responses", async () => {
+    const cache = makeCache();
+    const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, body: '{"items":[]}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as Record<string, unknown>;
+    expect(parsed.installed_version).toBeUndefined();
+  });
+});

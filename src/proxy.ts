@@ -9,6 +9,7 @@ import {
   serializeBody,
   buildCacheKey,
 } from "./cache.js";
+import { injectInstalledVersion } from "./meta.js";
 
 const GITHUB_API_HOST = "api.github.com";
 const GITHUB_UPLOADS_HOST = "uploads.github.com";
@@ -33,6 +34,10 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     return;
   }
   const callerId: string = typeof res.locals.callerId === "string" ? res.locals.callerId : "";
+
+  // gh CLI feature-detects against GET /meta's installed_version field (see meta.ts);
+  // real api.github.com/meta never sets it, so the proxy synthesizes one on the way out.
+  const isMetaRequest = req.method === "GET" && req.path === "/meta";
 
   // ── Caching: check for a live cache hit ─────────────────────────────────
   let cacheKey: string | undefined;
@@ -150,7 +155,8 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
           res.end();
           return;
         }
-        const body = Buffer.concat(chunks);
+        const rawBody = Buffer.concat(chunks);
+        const body = isMetaRequest ? injectInstalledVersion(rawBody) : rawBody;
         const statusCode = proxyRes.statusCode ?? 200;
         const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
         const responseHeaders: Record<string, string | string[] | undefined> = {
