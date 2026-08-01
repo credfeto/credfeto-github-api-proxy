@@ -5,7 +5,8 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
     coverage: {
-      reporter: ["text", "lcov"],
+      provider: "v8",
+      reporter: ["text", "lcov", "json-summary"],
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/index.ts"],
     },
