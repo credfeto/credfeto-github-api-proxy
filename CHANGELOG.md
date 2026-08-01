@@ -35,6 +35,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - Fixed ESLint n/no-missing-import and n/no-unpublished-import false positives in super-linter by providing eslint.config.mjs (flat config format required by super-linter v8 / ESLint v9) that disables those rules; the previous .eslintrc.yml was silently ignored by super-linter v8
 - Fix 401 Bad credentials when gh CLI combines --body with --add-label by stripping Transfer-Encoding and writing Buffer bodies directly
 - Fix Docker healthcheck: enable it in the Dockerfile (baked into the image) and remove the broken compose override, whose test array was missing the required CMD prefix and failed to start under Compose.
+- gh CLI 'workflow run' and '--search'-backed listings failing through the proxy with 'malformed version:' (issue #47)
 ### Changed
 - Updated GitHub Actions to Node.js 24 compatible versions: actions/checkout@v6.0.3, docker/setup-buildx-action@v4.1.0, docker/build-push-action@v7.2.0
 - Build uses esbuild to produce a single-file bundle with no node_modules in the runtime image
