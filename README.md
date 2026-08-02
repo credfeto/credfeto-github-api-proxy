@@ -269,10 +269,9 @@ sets `CREDENTIALS_FILE` so the proxy reads tokens from it; no `PROXY_TOKEN` or
   iptables integration does. If the published port was reachable over the LAN
   under Docker with no explicit firewalld rule, add one when moving to
   Podman, or the port will stop being reachable.
-- The `chmod 644 credentials.json` step above is required under rootless
-  Podman too: the container's nonroot UID (65532) maps through the host's
-  subuid range, so anything tighter than world-readable (e.g. `chmod 600`)
-  will fail with `EACCES` inside the container.
+- The file-permission requirement described above applies under rootless
+  Podman too: the container's nonroot UID maps through the host's subuid
+  range, so the same `chmod 644` step is still required.
 - Podman's default image build format is OCI, which silently ignores the
   Dockerfile `HEALTHCHECK`. If `podman compose build` builds the image
   (rather than pulling a pre-built one), build with `--format docker` to
