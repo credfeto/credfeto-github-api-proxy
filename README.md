@@ -243,7 +243,7 @@ docker run -p 3000:3000 \
 
 Copy `credentials.example.json` to `credentials.json`, fill in your tokens,
 make it readable, then bring the stack up with either Docker Compose or
-rootless Podman Compose — `docker-compose.yml` works unmodified with both:
+rootless Podman Compose: `docker-compose.yml` works unmodified with both.
 
 ```sh
 chmod 644 credentials.json
