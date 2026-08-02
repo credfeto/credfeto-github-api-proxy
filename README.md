@@ -239,19 +239,40 @@ docker run -p 3000:3000 \
   github-api-proxy
 ```
 
-### docker-compose
+### docker-compose / podman compose
 
 Copy `credentials.example.json` to `credentials.json`, fill in your tokens,
-make it readable, then:
+make it readable, then bring the stack up with either Docker Compose or
+rootless Podman Compose — `docker-compose.yml` works unmodified with both:
 
 ```sh
 chmod 644 credentials.json
+
+# Docker
 docker compose up -d
+
+# Rootless Podman
+podman compose up -d
 ```
 
-The compose file reads `PROXY_TOKEN` and `GITHUB_PAT` from the `.env` file (or
-from the shell environment) and passes them into the container. The image
-itself contains neither value.
+The compose file mounts `credentials.json` read-only into the container and
+sets `CREDENTIALS_FILE` so the proxy reads tokens from it; no `PROXY_TOKEN` or
+`GITHUB_PAT` environment variables are used.
+
+#### Rootless Podman notes
+
+- `restart: unless-stopped` is only honoured while a `podman` process is
+  managing the container, so it does not survive a host reboot on its own.
+  For restart-on-boot, run the compose stack under a systemd unit or enable
+  the `podman-restart` service.
+- Podman's `pasta` network backend does not bypass firewalld the way Docker's
+  iptables integration does. If the published port was reachable over the LAN
+  under Docker with no explicit firewalld rule, add one when moving to
+  Podman, or the port will stop being reachable.
+- The `chmod 644 credentials.json` step above is required under rootless
+  Podman too: the container's nonroot UID (65532) maps through the host's
+  subuid range, so anything tighter than world-readable (e.g. `chmod 600`)
+  will fail with `EACCES` inside the container.
 
 ---
 
