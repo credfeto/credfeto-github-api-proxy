@@ -92,6 +92,18 @@ Content-Type: application/json
 # REST pass-through (github.com paths)
 ###############################################################################
 
+### Meta — installed_version is synthesized so gh CLI feature-detection succeeds
+# api.github.com/meta never sets installed_version (GHES-only field); gh CLI
+# treats a non-github.com GH_HOST as Enterprise and fails `gh workflow run` /
+# `--search`-backed listings with "malformed version: " without it. The proxy
+# injects a synthetic installed_version ("3.30.0") when the field is absent
+# or empty, leaving every other field from GitHub's response untouched.
+# Expected: 200 with installed_version present in the body
+GET {{proxyHost}}/meta
+Authorization: Bearer {{proxyToken}}
+
+###
+
 ### List open pull requests — allowed (read-only)
 # Expected: 200 with PR list from GitHub
 GET {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/pulls?state=open
@@ -124,6 +136,13 @@ Content-Type: application/json
 ### Enterprise REST path — /api/v3 prefix is stripped by proxy before auth
 # Expected: same as GET /repos/… above
 GET {{proxyHost}}/api/v3/repos/credfeto/credfeto-github-api-proxy/issues?state=open
+Authorization: Bearer {{proxyToken}}
+
+###
+
+### Enterprise meta path — the exact request gh CLI sends when GH_HOST is set
+# Expected: same as GET /meta above (installed_version present)
+GET {{proxyHost}}/api/v3/meta
 Authorization: Bearer {{proxyToken}}
 
 ###############################################################################

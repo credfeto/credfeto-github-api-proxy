@@ -5,6 +5,7 @@ import { EventEmitter } from "events";
 import https from "https";
 import { forwardToGitHub } from "../proxy.js";
 import type { ResponseCache, CachedResponse, ETagEntry } from "../cache.js";
+import { mockUpstream } from "./https-request-mock.js";
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -59,54 +60,6 @@ function awaitEnd(res: FakeResponse): Promise<void> {
       resolve();
     });
   });
-}
-
-type UpstreamSetup = { statusCode?: number; headers?: Record<string, string>; body?: string };
-
-/**
- * Installs a one-shot spy on https.request. The fake response fires via
- * process.nextTick so the proxy has time to set up listeners or call pipe first.
- * Returns the request options that were passed to https.request.
- */
-function mockUpstream(setup: UpstreamSetup = {}): { getOptions: () => https.RequestOptions | null } {
-  let captured: https.RequestOptions | null = null;
-
-  vi.spyOn(https, "request").mockImplementationOnce((options, callback) => {
-    captured = options as https.RequestOptions;
-
-    const fakeRes = Object.assign(new EventEmitter(), {
-      statusCode: setup.statusCode ?? 200,
-      headers: { "content-type": "application/json", ...setup.headers },
-      // For non-buffered (pipe) path: call dest.end so the response completes
-      pipe: vi.fn((dest: { end: (d?: Buffer) => void }) => {
-        process.nextTick(() => {
-          dest.end(setup.body !== undefined ? Buffer.from(setup.body) : undefined);
-        });
-      }),
-    }) as unknown as IncomingMessage;
-
-    const fakeReq = Object.assign(new EventEmitter(), {
-      setHeader: vi.fn(),
-      write: vi.fn(),
-      end: vi.fn(),
-    }) as unknown as ClientRequest;
-
-    // Fire the upstream response asynchronously
-    process.nextTick(() => {
-      if (callback) {
-        callback(fakeRes);
-        // Emit data/end after the proxy registers its listeners
-        process.nextTick(() => {
-          if (setup.body !== undefined) fakeRes.emit("data", Buffer.from(setup.body));
-          fakeRes.emit("end");
-        });
-      }
-    });
-
-    return fakeReq;
-  });
-
-  return { getOptions: () => captured };
 }
 
 /** Build a mock ResponseCache from partial overrides. */
@@ -610,5 +563,55 @@ describe("forwardToGitHub — Transfer-Encoding / Buffer-body (issue #44)", () =
 
     expect((req.pipe as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
     expect(upstream.getOptions()?.hostname).toBe("api.github.com");
+  });
+});
+
+// ── Tests: GET /meta installed_version injection (issue #47) ─────────────────
+
+describe("forwardToGitHub — GET /meta installed_version injection", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it.each([
+    ["with a ResponseCache", true],
+    ["without a ResponseCache", false],
+  ])("injects installed_version into a /meta response that lacks it (%s)", async (_label, withCache) => {
+    const cache = withCache ? makeCache() : undefined;
+    const req = makeRequest({ url: "/meta", path: "/meta" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, body: '{"verifiable_password_authentication":true}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as Record<string, unknown>;
+    expect(parsed.installed_version).toBe("3.30.0");
+    expect(parsed.verifiable_password_authentication).toBe(true);
+  });
+
+  it("stores the injected body in the cache so a later cache hit serves it too", async () => {
+    const cache = makeCache();
+    const req = makeRequest({ url: "/meta", path: "/meta" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, headers: { etag: '"meta-etag"' }, body: '{}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const [, storedResponse] = (cache.store as ReturnType<typeof vi.fn>).mock.calls[0] as [string, CachedResponse];
+    const parsed = JSON.parse(storedResponse.body.toString("utf8")) as Record<string, unknown>;
+    expect(parsed.installed_version).toBe("3.30.0");
+  });
+
+  it("does not inject installed_version into non-/meta GET responses", async () => {
+    const cache = makeCache();
+    const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, body: '{"items":[]}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as Record<string, unknown>;
+    expect(parsed.installed_version).toBeUndefined();
   });
 });
