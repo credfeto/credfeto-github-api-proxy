@@ -273,6 +273,10 @@ sets `CREDENTIALS_FILE` so the proxy reads tokens from it; no `PROXY_TOKEN` or
   Podman too: the container's nonroot UID (65532) maps through the host's
   subuid range, so anything tighter than world-readable (e.g. `chmod 600`)
   will fail with `EACCES` inside the container.
+- Podman's default image build format is OCI, which silently ignores the
+  Dockerfile `HEALTHCHECK`. If `podman compose build` builds the image
+  (rather than pulling a pre-built one), build with `--format docker` to
+  keep the healthcheck active.
 
 ---
 
