@@ -24,6 +24,21 @@ function redactAuthorization(headers: http.OutgoingHttpHeaders): http.OutgoingHt
 }
 
 /**
+ * Tees up to maxBytes of a response stream without buffering more even if the
+ * stream is much larger, then hands the capped body to onComplete.
+ */
+function teeBoundedBody(stream: NodeJS.ReadableStream, maxBytes: number, onComplete: (body: Buffer) => void): void {
+  const chunks: Buffer[] = [];
+  let buffered = 0;
+  stream.on("data", (chunk: Buffer) => {
+    if (buffered >= maxBytes) return;
+    chunks.push(chunk);
+    buffered += chunk.length;
+  });
+  stream.on("end", () => onComplete(Buffer.concat(chunks)));
+}
+
+/**
  * Logs full request/response detail when GitHub responds to a POST with a 5xx
  * status, so a recurrence of issue #53 (createPullRequest failing with an
  * opaque upstream 500) leaves enough evidence to find the real cause.
@@ -257,15 +272,8 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     // Tee a bounded copy of the body for diagnostics when GitHub returns a 5xx
     // for a POST; the client still gets the full, untouched piped response.
     if (req.method === "POST" && (proxyRes.statusCode ?? 0) >= 500) {
-      const diagnosticChunks: Buffer[] = [];
-      let diagnosticBuffered = 0;
-      proxyRes.on("data", (chunk: Buffer) => {
-        if (diagnosticBuffered >= MAX_DIAGNOSTIC_BODY_BYTES) return;
-        diagnosticChunks.push(chunk);
-        diagnosticBuffered += chunk.length;
-      });
-      proxyRes.on("end", () => {
-        reportUpstream5xx(proxyRes.statusCode ?? 0, proxyRes.headers, Buffer.concat(diagnosticChunks));
+      teeBoundedBody(proxyRes, MAX_DIAGNOSTIC_BODY_BYTES, (body) => {
+        reportUpstream5xx(proxyRes.statusCode ?? 0, proxyRes.headers, body);
       });
     }
 
