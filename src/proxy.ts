@@ -114,11 +114,6 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   const isBufferBody = !isJsonBody && Buffer.isBuffer(req.body) && (req.body as Buffer).length > 0;
   // Serialised once and reused both for the outgoing write and (on a 5xx) the diagnostic log.
   const serialisedJsonBody: string | undefined = isJsonBody ? (preSerialisedBody ?? JSON.stringify(req.body)) : undefined;
-  const outgoingBodyForLog: string | undefined = isJsonBody
-    ? serialisedJsonBody
-    : isBufferBody
-      ? `<buffer: ${(req.body as Buffer).length} bytes>`
-      : undefined;
 
   const headers: http.OutgoingHttpHeaders = {
     ...req.headers,
@@ -152,11 +147,16 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
 
   const reportUpstream5xx = (statusCode: number, responseHeaders: http.IncomingHttpHeaders, responseBody: Buffer): void => {
     if (req.method === "POST" && statusCode >= 500) {
+      const requestBody: string | undefined = isJsonBody
+        ? serialisedJsonBody
+        : isBufferBody
+          ? `<buffer: ${(req.body as Buffer).length} bytes>`
+          : undefined;
       logUpstream5xx({
         method: req.method,
         path: options.path ?? "",
         requestHeaders: headers,
-        requestBody: outgoingBodyForLog,
+        requestBody,
         statusCode,
         responseHeaders,
         responseBody,
