@@ -233,7 +233,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
           };
           responseCache.store(cacheKey, cachedResponse, etag);
         }
-        reportUpstream5xx(statusCode, proxyRes.headers, rawBody);
+        reportUpstream5xx(statusCode, proxyRes.headers, rawBody.subarray(0, MAX_DIAGNOSTIC_BODY_BYTES));
         res.writeHead(statusCode, { ...responseHeaders, "content-length": body.length });
         res.end(body);
       });
