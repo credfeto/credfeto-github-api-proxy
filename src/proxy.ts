@@ -112,8 +112,10 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   // Both consume the underlying stream, so piping req would send an empty body.
   const isJsonBody = Boolean(req.is("application/json")) && req.body !== undefined && !Buffer.isBuffer(req.body);
   const isBufferBody = !isJsonBody && Buffer.isBuffer(req.body) && (req.body as Buffer).length > 0;
+  // Serialised once and reused both for the outgoing write and (on a 5xx) the diagnostic log.
+  const serialisedJsonBody: string | undefined = isJsonBody ? (preSerialisedBody ?? JSON.stringify(req.body)) : undefined;
   const outgoingBodyForLog: string | undefined = isJsonBody
-    ? (preSerialisedBody ?? JSON.stringify(req.body))
+    ? serialisedJsonBody
     : isBufferBody
       ? `<buffer: ${(req.body as Buffer).length} bytes>`
       : undefined;
@@ -146,6 +148,20 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     path: targetUrl.pathname + targetUrl.search,
     method: req.method,
     headers,
+  };
+
+  const reportUpstream5xx = (statusCode: number, responseHeaders: http.IncomingHttpHeaders, responseBody: Buffer): void => {
+    if (req.method === "POST" && statusCode >= 500) {
+      logUpstream5xx({
+        method: req.method,
+        path: options.path ?? "",
+        requestHeaders: headers,
+        requestBody: outgoingBodyForLog,
+        statusCode,
+        responseHeaders,
+        responseBody,
+      });
+    }
   };
 
   const proxyReq = https.request(options, (proxyRes) => {
@@ -217,17 +233,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
           };
           responseCache.store(cacheKey, cachedResponse, etag);
         }
-        if (req.method === "POST" && statusCode >= 500) {
-          logUpstream5xx({
-            method: req.method,
-            path: options.path ?? "",
-            requestHeaders: headers,
-            requestBody: outgoingBodyForLog,
-            statusCode,
-            responseHeaders: proxyRes.headers,
-            responseBody: rawBody,
-          });
-        }
+        reportUpstream5xx(statusCode, proxyRes.headers, rawBody);
         res.writeHead(statusCode, { ...responseHeaders, "content-length": body.length });
         res.end(body);
       });
@@ -259,15 +265,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         diagnosticBuffered += chunk.length;
       });
       proxyRes.on("end", () => {
-        logUpstream5xx({
-          method: req.method,
-          path: options.path ?? "",
-          requestHeaders: headers,
-          requestBody: outgoingBodyForLog,
-          statusCode: proxyRes.statusCode ?? 0,
-          responseHeaders: proxyRes.headers,
-          responseBody: Buffer.concat(diagnosticChunks),
-        });
+        reportUpstream5xx(proxyRes.statusCode ?? 0, proxyRes.headers, Buffer.concat(diagnosticChunks));
       });
     }
 
@@ -287,7 +285,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   // directly so the correct content-length can be set (transfer-encoding was stripped from
   // the outgoing headers above).  Only truly unmodified streams fall through to pipe.
   if (isJsonBody) {
-    const serialised = preSerialisedBody ?? JSON.stringify(req.body);
+    const serialised = serialisedJsonBody as string;
     proxyReq.setHeader("content-length", Buffer.byteLength(serialised));
     proxyReq.write(serialised);
     proxyReq.end();
