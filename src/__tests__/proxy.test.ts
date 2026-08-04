@@ -566,6 +566,108 @@ describe("forwardToGitHub — Transfer-Encoding / Buffer-body (issue #44)", () =
   });
 });
 
+// ── Tests: 5xx diagnostic logging for POST requests (issue #53) ──────────────
+
+describe("forwardToGitHub — 5xx diagnostic logging on POST", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  function findDiagnosticLog(spy: ReturnType<typeof vi.spyOn>): string | undefined {
+    const call = (spy.mock.calls as unknown[][]).find(
+      (c) => typeof c[0] === "string" && c[0].includes("5xx"),
+    );
+    return call?.[1] as string | undefined;
+  }
+
+  it("logs request and response detail when upstream returns a 500 for a REST POST", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const req = makeRequest({
+      method: "POST",
+      url: "/repos/alice/myrepo/pulls",
+      body: { title: "my PR" },
+      isJson: true,
+    });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 500, body: '{"message":"Internal Server Error"}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const logged = findDiagnosticLog(errorSpy);
+    expect(logged).toBeDefined();
+    expect(logged).toContain("\"statusCode\":500");
+    expect(logged).toContain("Internal Server Error");
+    expect(logged).toContain("/repos/alice/myrepo/pulls");
+    expect(logged).toContain("my PR");
+  });
+
+  it("logs request and response detail when upstream returns a 500 for a GraphQL mutation", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const req = makeRequest({
+      method: "POST",
+      url: "/graphql",
+      body: { query: "mutation { createPullRequest { pullRequest { number } } }" },
+      isJson: true,
+    });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 502, body: "" });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const logged = findDiagnosticLog(errorSpy);
+    expect(logged).toBeDefined();
+    expect(logged).toContain("\"statusCode\":502");
+  });
+
+  it("redacts the Authorization header value in the diagnostic log", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const req = makeRequest({
+      method: "POST",
+      url: "/repos/alice/myrepo/pulls",
+      body: { title: "my PR" },
+      isJson: true,
+    });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 500, body: '{"message":"boom"}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const logged = findDiagnosticLog(errorSpy);
+    expect(logged).not.toContain("ghp_real");
+    expect(logged).toContain("REDACTED");
+  });
+
+  it.each([201, 422])("does not log for a %d POST response", async (statusCode) => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const req = makeRequest({
+      method: "POST",
+      url: "/repos/alice/myrepo/pulls",
+      body: { title: "my PR" },
+      isJson: true,
+    });
+    const res = makeResponse();
+    mockUpstream({ statusCode, body: '{"id":1}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    expect(findDiagnosticLog(errorSpy)).toBeUndefined();
+  });
+
+  it("does not log for a 5xx GET response", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 503, body: '{"message":"unavailable"}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    expect(findDiagnosticLog(errorSpy)).toBeUndefined();
+  });
+});
+
 // ── Tests: GET /meta installed_version injection (issue #47) ─────────────────
 
 describe("forwardToGitHub — GET /meta installed_version injection", () => {

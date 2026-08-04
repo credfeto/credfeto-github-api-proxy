@@ -14,6 +14,47 @@ import { injectInstalledVersion } from "./meta.js";
 const GITHUB_API_HOST = "api.github.com";
 const GITHUB_UPLOADS_HOST = "uploads.github.com";
 
+const REDACTED = "[REDACTED]";
+const MAX_DIAGNOSTIC_BODY_BYTES = 64 * 1024;
+
+function redactAuthorization(headers: http.OutgoingHttpHeaders): http.OutgoingHttpHeaders {
+  const redacted: http.OutgoingHttpHeaders = { ...headers };
+  if (redacted.authorization !== undefined) redacted.authorization = REDACTED;
+  return redacted;
+}
+
+/**
+ * Logs full request/response detail when GitHub responds to a POST with a 5xx
+ * status, so a recurrence of issue #53 (createPullRequest failing with an
+ * opaque upstream 500) leaves enough evidence to find the real cause.
+ */
+function logUpstream5xx(details: {
+  method: string;
+  path: string;
+  requestHeaders: http.OutgoingHttpHeaders;
+  requestBody: string | undefined;
+  statusCode: number;
+  responseHeaders: http.IncomingHttpHeaders;
+  responseBody: Buffer;
+}): void {
+  console.error(
+    "Proxy upstream 5xx error on POST request:",
+    JSON.stringify({
+      request: {
+        method: details.method,
+        path: details.path,
+        headers: redactAuthorization(details.requestHeaders),
+        body: details.requestBody,
+      },
+      response: {
+        statusCode: details.statusCode,
+        headers: details.responseHeaders,
+        body: details.responseBody.toString("utf8"),
+      },
+    }),
+  );
+}
+
 /**
  * Forward the incoming request to GitHub and pipe the response back.
  *
@@ -71,6 +112,11 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   // Both consume the underlying stream, so piping req would send an empty body.
   const isJsonBody = Boolean(req.is("application/json")) && req.body !== undefined && !Buffer.isBuffer(req.body);
   const isBufferBody = !isJsonBody && Buffer.isBuffer(req.body) && (req.body as Buffer).length > 0;
+  const outgoingBodyForLog: string | undefined = isJsonBody
+    ? (preSerialisedBody ?? JSON.stringify(req.body))
+    : isBufferBody
+      ? `<buffer: ${(req.body as Buffer).length} bytes>`
+      : undefined;
 
   const headers: http.OutgoingHttpHeaders = {
     ...req.headers,
@@ -171,6 +217,17 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
           };
           responseCache.store(cacheKey, cachedResponse, etag);
         }
+        if (req.method === "POST" && statusCode >= 500) {
+          logUpstream5xx({
+            method: req.method,
+            path: options.path ?? "",
+            requestHeaders: headers,
+            requestBody: outgoingBodyForLog,
+            statusCode,
+            responseHeaders: proxyRes.headers,
+            responseBody: rawBody,
+          });
+        }
         res.writeHead(statusCode, { ...responseHeaders, "content-length": body.length });
         res.end(body);
       });
@@ -190,6 +247,30 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         res.status(502).json({ message: "Bad gateway" });
       }
     });
+
+    // Tee a bounded copy of the body for diagnostics when GitHub returns a 5xx
+    // for a POST; the client still gets the full, untouched piped response.
+    if (req.method === "POST" && (proxyRes.statusCode ?? 0) >= 500) {
+      const diagnosticChunks: Buffer[] = [];
+      let diagnosticBuffered = 0;
+      proxyRes.on("data", (chunk: Buffer) => {
+        if (diagnosticBuffered >= MAX_DIAGNOSTIC_BODY_BYTES) return;
+        diagnosticChunks.push(chunk);
+        diagnosticBuffered += chunk.length;
+      });
+      proxyRes.on("end", () => {
+        logUpstream5xx({
+          method: req.method,
+          path: options.path ?? "",
+          requestHeaders: headers,
+          requestBody: outgoingBodyForLog,
+          statusCode: proxyRes.statusCode ?? 0,
+          responseHeaders: proxyRes.headers,
+          responseBody: Buffer.concat(diagnosticChunks),
+        });
+      });
+    }
+
     res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
     proxyRes.pipe(res, { end: true });
   });
