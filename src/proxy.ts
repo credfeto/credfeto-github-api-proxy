@@ -14,6 +14,62 @@ import { injectInstalledVersion } from "./meta.js";
 const GITHUB_API_HOST = "api.github.com";
 const GITHUB_UPLOADS_HOST = "uploads.github.com";
 
+const REDACTED = "[REDACTED]";
+const MAX_DIAGNOSTIC_BODY_BYTES = 64 * 1024;
+
+function redactAuthorization(headers: http.OutgoingHttpHeaders): http.OutgoingHttpHeaders {
+  const redacted: http.OutgoingHttpHeaders = { ...headers };
+  if (redacted.authorization !== undefined) redacted.authorization = REDACTED;
+  return redacted;
+}
+
+/**
+ * Tees up to maxBytes of a response stream without buffering more even if the
+ * stream is much larger, then hands the capped body to onComplete.
+ */
+function teeBoundedBody(stream: NodeJS.ReadableStream, maxBytes: number, onComplete: (body: Buffer) => void): void {
+  const chunks: Buffer[] = [];
+  let buffered = 0;
+  stream.on("data", (chunk: Buffer) => {
+    if (buffered >= maxBytes) return;
+    chunks.push(chunk);
+    buffered += chunk.length;
+  });
+  stream.on("end", () => onComplete(Buffer.concat(chunks)));
+}
+
+/**
+ * Logs full request/response detail when GitHub responds to a POST with a 5xx
+ * status, so a recurrence of issue #53 (createPullRequest failing with an
+ * opaque upstream 500) leaves enough evidence to find the real cause.
+ */
+function logUpstream5xx(details: {
+  method: string;
+  path: string;
+  requestHeaders: http.OutgoingHttpHeaders;
+  requestBody: string | undefined;
+  statusCode: number;
+  responseHeaders: http.IncomingHttpHeaders;
+  responseBody: Buffer;
+}): void {
+  console.error(
+    "Proxy upstream 5xx error on POST request:",
+    JSON.stringify({
+      request: {
+        method: details.method,
+        path: details.path,
+        headers: redactAuthorization(details.requestHeaders),
+        body: details.requestBody,
+      },
+      response: {
+        statusCode: details.statusCode,
+        headers: details.responseHeaders,
+        body: details.responseBody.toString("utf8"),
+      },
+    }),
+  );
+}
+
 /**
  * Forward the incoming request to GitHub and pipe the response back.
  *
@@ -71,6 +127,8 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   // Both consume the underlying stream, so piping req would send an empty body.
   const isJsonBody = Boolean(req.is("application/json")) && req.body !== undefined && !Buffer.isBuffer(req.body);
   const isBufferBody = !isJsonBody && Buffer.isBuffer(req.body) && (req.body as Buffer).length > 0;
+  // Serialised once and reused both for the outgoing write and (on a 5xx) the diagnostic log.
+  const serialisedJsonBody: string | undefined = isJsonBody ? (preSerialisedBody ?? JSON.stringify(req.body)) : undefined;
 
   const headers: http.OutgoingHttpHeaders = {
     ...req.headers,
@@ -100,6 +158,25 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     path: targetUrl.pathname + targetUrl.search,
     method: req.method,
     headers,
+  };
+
+  const reportUpstream5xx = (statusCode: number, responseHeaders: http.IncomingHttpHeaders, responseBody: Buffer): void => {
+    if (req.method === "POST" && statusCode >= 500) {
+      const requestBody: string | undefined = isJsonBody
+        ? serialisedJsonBody
+        : isBufferBody
+          ? `<buffer: ${(req.body as Buffer).length} bytes>`
+          : undefined;
+      logUpstream5xx({
+        method: req.method,
+        path: options.path ?? "",
+        requestHeaders: headers,
+        requestBody,
+        statusCode,
+        responseHeaders,
+        responseBody,
+      });
+    }
   };
 
   const proxyReq = https.request(options, (proxyRes) => {
@@ -171,6 +248,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
           };
           responseCache.store(cacheKey, cachedResponse, etag);
         }
+        reportUpstream5xx(statusCode, proxyRes.headers, rawBody.subarray(0, MAX_DIAGNOSTIC_BODY_BYTES));
         res.writeHead(statusCode, { ...responseHeaders, "content-length": body.length });
         res.end(body);
       });
@@ -190,6 +268,15 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         res.status(502).json({ message: "Bad gateway" });
       }
     });
+
+    // Tee a bounded copy of the body for diagnostics when GitHub returns a 5xx
+    // for a POST; the client still gets the full, untouched piped response.
+    if (req.method === "POST" && (proxyRes.statusCode ?? 0) >= 500) {
+      teeBoundedBody(proxyRes, MAX_DIAGNOSTIC_BODY_BYTES, (body) => {
+        reportUpstream5xx(proxyRes.statusCode ?? 0, proxyRes.headers, body);
+      });
+    }
+
     res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
     proxyRes.pipe(res, { end: true });
   });
@@ -206,7 +293,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   // directly so the correct content-length can be set (transfer-encoding was stripped from
   // the outgoing headers above).  Only truly unmodified streams fall through to pipe.
   if (isJsonBody) {
-    const serialised = preSerialisedBody ?? JSON.stringify(req.body);
+    const serialised = serialisedJsonBody as string;
     proxyReq.setHeader("content-length", Buffer.byteLength(serialised));
     proxyReq.write(serialised);
     proxyReq.end();
