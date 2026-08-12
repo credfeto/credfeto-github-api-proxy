@@ -767,9 +767,9 @@ describe("forwardToGitHub — GET /meta installed_version injection", () => {
   });
 });
 
-// ── Tests: api.github.com URL rewriting (issue #65) ───────────────────────────
+// ── Tests: api.github.com URL rewriting ────────────────────────────────────────
 
-describe("forwardToGitHub — api.github.com URL rewriting", () => {
+describe("forwardToGitHub: api.github.com URL rewriting", () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   it("rewrites embedded api.github.com URLs in a cacheable JSON response body", async () => {
