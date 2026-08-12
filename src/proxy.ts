@@ -10,6 +10,7 @@ import {
   buildCacheKey,
 } from "./cache.js";
 import { injectInstalledVersion } from "./meta.js";
+import { rewriteJsonBody, rewriteResponseHeaders } from "./rewrite-urls.js";
 
 const GITHUB_API_HOST = "api.github.com";
 const GITHUB_UPLOADS_HOST = "uploads.github.com";
@@ -91,6 +92,10 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   }
   const callerId: string = typeof res.locals.callerId === "string" ? res.locals.callerId : "";
 
+  // Everything that points back to api.github.com must be rewritten to point back at
+  // the proxy (issue #65), so clients following a URL from a response never bypass it.
+  const proxyOrigin = `${req.protocol}://${req.get("host")}`;
+
   // gh CLI feature-detects against GET /meta's installed_version field (see meta.ts);
   // real api.github.com/meta never sets it, so the proxy synthesizes one on the way out.
   const isMetaRequest = req.method === "GET" && req.path === "/meta";
@@ -138,6 +143,11 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     "x-forwarded-for": undefined,
     "x-forwarded-host": undefined,
     "x-forwarded-proto": undefined,
+    // Force identity encoding: JSON responses are parsed (URL rewriting, meta
+    // injection) and re-serialised, which requires the body to already be
+    // uncompressed. Without this, a client sending Accept-Encoding: gzip would
+    // get back a gzip body GitHub never actually compressed for the rewrite.
+    "accept-encoding": undefined,
     // When we re-serialise the body, remove transfer-encoding (RFC 7230 §3.3.2 forbids
     // combining it with content-length) and the stale content-length from the original
     // request (we will set the correct value after serialisation).
@@ -182,9 +192,15 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   const proxyReq = https.request(options, (proxyRes) => {
     // ── 304 Not Modified: replay the previously cached body ──────────────
     if (proxyRes.statusCode === 304 && etagEntry !== undefined) {
+      // 304 headers (e.g. updated rate-limit) override stale stored values. etagEntry.headers
+      // were already rewritten when stored, but proxyRes.headers are fresh from GitHub, so the
+      // merged set is rewritten again here (rewriting an already-rewritten value is a no-op).
+      const mergedHeaders = rewriteResponseHeaders(
+        { ...etagEntry.headers, ...(proxyRes.headers as Record<string, string | string[] | undefined>) },
+        proxyOrigin,
+      );
       const replyHeaders: Record<string, string | string[] | number | undefined> = {
-        ...etagEntry.headers,
-        ...proxyRes.headers,  // 304 headers (e.g. updated rate-limit) override stale stored values
+        ...mergedHeaders,
         "content-length": etagEntry.body.length,
       };
       delete replyHeaders["transfer-encoding"];
@@ -203,7 +219,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
       : "";
     const isJsonResponse = contentType.includes("application/json") || contentType.includes("application/graphql");
 
-    if (((cacheKey !== undefined && responseCache !== undefined) || isMetaRequest) && isJsonResponse) {
+    if (isJsonResponse) {
       const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
       let totalBuffered = 0;
       let overflowed = false;
@@ -217,7 +233,10 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         if (totalBuffered > MAX_BUFFER_BYTES) {
           // Too large to cache: flush buffered data directly and stop accumulating
           overflowed = true;
-          const overflowHeaders = { ...(proxyRes.headers as Record<string, string | string[] | undefined>) };
+          const overflowHeaders = rewriteResponseHeaders(
+            { ...(proxyRes.headers as Record<string, string | string[] | undefined>) },
+            proxyOrigin,
+          );
           delete overflowHeaders["transfer-encoding"];
           res.writeHead(proxyRes.statusCode ?? 502, overflowHeaders);
           for (const c of chunks) res.write(c);
@@ -233,12 +252,14 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
           return;
         }
         const rawBody = Buffer.concat(chunks);
-        const body = isMetaRequest ? injectInstalledVersion(rawBody) : rawBody;
+        const metaBody = isMetaRequest ? injectInstalledVersion(rawBody) : rawBody;
+        const body = rewriteJsonBody(metaBody, proxyOrigin);
         const statusCode = proxyRes.statusCode ?? 200;
         const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
-        const responseHeaders: Record<string, string | string[] | undefined> = {
-          ...(proxyRes.headers as Record<string, string | string[] | undefined>),
-        };
+        const responseHeaders: Record<string, string | string[] | undefined> = rewriteResponseHeaders(
+          { ...(proxyRes.headers as Record<string, string | string[] | undefined>) },
+          proxyOrigin,
+        );
         delete responseHeaders["transfer-encoding"];
         if (cacheKey !== undefined && responseCache !== undefined && statusCode >= 200 && statusCode < 300) {
           const cachedResponse: CachedResponse = {
@@ -277,7 +298,10 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
       });
     }
 
-    res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+    res.writeHead(
+      proxyRes.statusCode ?? 502,
+      rewriteResponseHeaders(proxyRes.headers as Record<string, string | string[] | undefined>, proxyOrigin),
+    );
     proxyRes.pipe(res, { end: true });
   });
 

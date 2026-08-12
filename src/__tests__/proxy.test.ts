@@ -9,6 +9,9 @@ import { mockUpstream } from "./https-request-mock.js";
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
+const PROXY_HOST = "proxy.example.com";
+const PROXY_ORIGIN = `https://${PROXY_HOST}`;
+
 function makeRequest(opts: {
   method?: string;
   url?: string;
@@ -16,16 +19,22 @@ function makeRequest(opts: {
   body?: unknown;
   isJson?: boolean;
   extraHeaders?: Record<string, string>;
+  protocol?: string;
+  host?: string;
 }): Request {
   const method = opts.method ?? "GET";
   const url = opts.url ?? "/repos/alice/myrepo/issues";
+  const protocol = opts.protocol ?? "https";
+  const host = opts.host ?? PROXY_HOST;
   return {
     method,
     url,
     path: opts.path ?? url.split("?")[0],
+    protocol,
     headers: { "user-agent": "test-agent/1.0", authorization: "token ghp_real", ...opts.extraHeaders },
     body: opts.body,
     is: (type: string) => (opts.isJson && type === "application/json" && opts.body !== undefined ? type : false),
+    get: (name: string) => (name.toLowerCase() === "host" ? host : undefined),
     pipe: vi.fn(),
   } as unknown as Request;
 }
@@ -43,6 +52,7 @@ function makeResponse(callerId = "test-caller"): FakeResponse {
     headersSent: false,
     locals: { callerId } as Record<string, unknown>,
     writeHead: vi.fn((code: number) => { res._statusCode = code; res.headersSent = true; }),
+    write: vi.fn(),
     end: vi.fn((data?: Buffer | string) => {
       res._body = Buffer.isBuffer(data) ? data : data !== undefined ? Buffer.from(data as string) : Buffer.alloc(0);
     }),
@@ -208,6 +218,21 @@ describe("forwardToGitHub — ETag: attaches If-None-Match", () => {
     forwardToGitHub(req, res as unknown as Response, cache);
 
     expect(capturedHeaders?.["if-none-match"]).toBe('"etag-v1"');
+  });
+
+  it("strips Accept-Encoding from the outgoing request so JSON responses arrive uncompressed", () => {
+    const cache = makeCache();
+    const req = makeRequest({ extraHeaders: { "accept-encoding": "gzip, deflate, br" } });
+    const res = makeResponse();
+    let capturedHeaders: Record<string, unknown> | undefined;
+    vi.spyOn(https, "request").mockImplementationOnce((options) => {
+      capturedHeaders = (options as https.RequestOptions).headers as Record<string, unknown>;
+      return Object.assign(new EventEmitter(), { setHeader: vi.fn(), write: vi.fn(), end: vi.fn() }) as unknown as ClientRequest;
+    });
+
+    forwardToGitHub(req, res as unknown as Response, cache);
+
+    expect(capturedHeaders?.["accept-encoding"]).toBeUndefined();
   });
 
   it("does not add If-None-Match when no ETag entry is stored", () => {
@@ -666,6 +691,30 @@ describe("forwardToGitHub — 5xx diagnostic logging on POST", () => {
 
     expect(findDiagnosticLog(errorSpy)).toBeUndefined();
   });
+
+  it("logs request and response detail via the streamed tee when a non-JSON POST response returns 5xx", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const req = makeRequest({
+      method: "POST",
+      url: "/repos/alice/myrepo/releases/1/assets",
+      body: Buffer.from("asset-data"),
+      isJson: false,
+    });
+    const res = makeResponse();
+    mockUpstream({
+      statusCode: 503,
+      headers: { "content-type": "application/octet-stream" },
+      body: "upstream unavailable",
+    });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const logged = findDiagnosticLog(errorSpy);
+    expect(logged).toBeDefined();
+    expect(logged).toContain("\"statusCode\":503");
+    expect(logged).toContain("upstream unavailable");
+  });
 });
 
 // ── Tests: GET /meta installed_version injection (issue #47) ─────────────────
@@ -715,5 +764,174 @@ describe("forwardToGitHub — GET /meta installed_version injection", () => {
 
     const parsed = JSON.parse(res._body!.toString("utf8")) as Record<string, unknown>;
     expect(parsed.installed_version).toBeUndefined();
+  });
+});
+
+// ── Tests: api.github.com URL rewriting (issue #65) ───────────────────────────
+
+describe("forwardToGitHub — api.github.com URL rewriting", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("rewrites embedded api.github.com URLs in a cacheable JSON response body", async () => {
+    const cache = makeCache();
+    const req = makeRequest({ url: "/notifications" });
+    const res = makeResponse();
+    mockUpstream({
+      statusCode: 200,
+      body: '{"subject":{"url":"https://api.github.com/notifications/threads/1"}}',
+    });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as { subject: { url: string } };
+    expect(parsed.subject.url).toBe(`${PROXY_ORIGIN}/notifications/threads/1`);
+  });
+
+  it("stores the rewritten body in the cache so a later cache hit serves the rewritten form", async () => {
+    const cache = makeCache();
+    const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, body: '{"url":"https://api.github.com/repos/alice/myrepo/issues/1"}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const [, storedResponse] = (cache.store as ReturnType<typeof vi.fn>).mock.calls[0] as [string, CachedResponse];
+    const parsed = JSON.parse(storedResponse.body.toString("utf8")) as { url: string };
+    expect(parsed.url).toBe(`${PROXY_ORIGIN}/repos/alice/myrepo/issues/1`);
+  });
+
+  it("rewrites embedded api.github.com URLs on a non-cacheable POST response (e.g. issue creation)", async () => {
+    const req = makeRequest({
+      method: "POST",
+      url: "/repos/alice/myrepo/issues",
+      body: { title: "bug" },
+      isJson: true,
+    });
+    const res = makeResponse();
+    mockUpstream({
+      statusCode: 201,
+      body: JSON.stringify({
+        url: "https://api.github.com/repos/alice/myrepo/issues/5",
+        repository_url: "https://api.github.com/repos/alice/myrepo",
+        html_url: "https://github.com/alice/myrepo/issues/5",
+      }),
+    });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as Record<string, string>;
+    expect(parsed.url).toBe(`${PROXY_ORIGIN}/repos/alice/myrepo/issues/5`);
+    expect(parsed.repository_url).toBe(`${PROXY_ORIGIN}/repos/alice/myrepo`);
+    expect(parsed.html_url).toBe("https://github.com/alice/myrepo/issues/5");
+  });
+
+  it("rewrites the Link pagination header on a buffered JSON response", async () => {
+    const cache = makeCache();
+    const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
+    const res = makeResponse();
+    mockUpstream({
+      statusCode: 200,
+      headers: {
+        link: '<https://api.github.com/repos/alice/myrepo/issues?page=2>; rel="next", <https://api.github.com/repos/alice/myrepo/issues?page=5>; rel="last"',
+      },
+      body: "[]",
+    });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const writeHeadCall = (res.writeHead as ReturnType<typeof vi.fn>).mock.calls[0];
+    const headers = writeHeadCall?.[1] as Record<string, unknown>;
+    expect(headers?.link).toBe(
+      `<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next", <${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=5>; rel="last"`,
+    );
+  });
+
+  it("rewrites headers on a binary pass-through response while leaving the body untouched", async () => {
+    const req = makeRequest({ url: "/repos/alice/myrepo/releases/1/assets/9" });
+    const res = makeResponse();
+    mockUpstream({
+      statusCode: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        link: '<https://api.github.com/repos/alice/myrepo/releases/1/assets?page=2>; rel="next"',
+      },
+      body: "binary-data",
+    });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const writeHeadCall = (res.writeHead as ReturnType<typeof vi.fn>).mock.calls[0];
+    const headers = writeHeadCall?.[1] as Record<string, unknown>;
+    expect(headers?.link).toBe(`<${PROXY_ORIGIN}/repos/alice/myrepo/releases/1/assets?page=2>; rel="next"`);
+    expect(res._body?.toString()).toBe("binary-data");
+  });
+
+  it("rewrites api.github.com URLs in headers merged from a fresh 304 response", async () => {
+    const originalBody = Buffer.from('{"original":true}');
+    const etagEntry: ETagEntry = {
+      etag: '"etag-v1"',
+      statusCode: 200,
+      headers: { "content-type": "application/json" },
+      body: originalBody,
+    };
+    const cache = makeCache({
+      getCachedResponse: vi.fn().mockReturnValue(undefined),
+      getETagEntry: vi.fn().mockReturnValue(etagEntry),
+    });
+    const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
+    const res = makeResponse();
+
+    vi.spyOn(https, "request").mockImplementationOnce((_options, callback) => {
+      const fakeRes = Object.assign(new EventEmitter(), {
+        statusCode: 304,
+        headers: { link: '<https://api.github.com/repos/alice/myrepo/issues?page=2>; rel="next"' },
+        resume: vi.fn(),
+      }) as unknown as IncomingMessage;
+      process.nextTick(() => { if (callback) callback(fakeRes); });
+      return Object.assign(new EventEmitter(), { setHeader: vi.fn(), write: vi.fn(), end: vi.fn() }) as unknown as ClientRequest;
+    });
+
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const writeHeadCall = (res.writeHead as ReturnType<typeof vi.fn>).mock.calls[0];
+    const headers = writeHeadCall?.[1] as Record<string, unknown>;
+    expect(headers?.link).toBe(`<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next"`);
+  });
+
+  it("rewrites headers in the overflow branch when a JSON response exceeds the buffer limit", async () => {
+    const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
+    const res = makeResponse();
+    const hugeBody = `{"data":"${"x".repeat(4 * 1024 * 1024 + 10)}"}`;
+    mockUpstream({
+      statusCode: 200,
+      headers: { link: '<https://api.github.com/repos/alice/myrepo/issues?page=2>; rel="next"' },
+      body: hugeBody,
+    });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const writeHeadCall = (res.writeHead as ReturnType<typeof vi.fn>).mock.calls[0];
+    const headers = writeHeadCall?.[1] as Record<string, unknown>;
+    expect(headers?.link).toBe(`<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next"`);
+  });
+
+  it("uses the incoming request's protocol and host as the proxy origin", async () => {
+    const req = makeRequest({ url: "/notifications", protocol: "http", host: "localhost:8080" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, body: '{"url":"https://api.github.com/notifications/threads/1"}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as { url: string };
+    expect(parsed.url).toBe("http://localhost:8080/notifications/threads/1");
   });
 });
