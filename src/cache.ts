@@ -1,7 +1,6 @@
 import crypto from "crypto";
 
-// Shared with rewrite-urls.ts's walkAndRewrite, which walks the same kind of
-// parsed JSON body and must stay in lock-step on how deep is too deep.
+// Guards against pathological/cyclic depth when recursively walking a parsed JSON body.
 export const MAX_JSON_WALK_DEPTH = 50;
 
 function sortJsonKeys(val: unknown, depth = 0): unknown {

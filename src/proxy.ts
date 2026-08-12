@@ -92,7 +92,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   const callerId: string = typeof res.locals.callerId === "string" ? res.locals.callerId : "";
 
   // Everything that points back to api.github.com must be rewritten to point back at
-  // the proxy (issue #65), so clients following a URL from a response never bypass it.
+  // the proxy, so clients following a URL from a response never bypass it.
   const proxyOrigin = `${req.protocol}://${req.get("host")}`;
 
   // gh CLI feature-detects against GET /meta's installed_version field (see meta.ts);
