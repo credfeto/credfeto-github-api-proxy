@@ -923,6 +923,20 @@ describe("forwardToGitHub — api.github.com URL rewriting", () => {
     expect(headers?.link).toBe(`<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next"`);
   });
 
+  it("warns that URL rewriting was skipped when a JSON response overflows the buffer limit", async () => {
+    const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
+    const res = makeResponse();
+    const hugeBody = `{"url":"https://api.github.com/repos/alice/myrepo","data":"${"x".repeat(4 * 1024 * 1024 + 10)}"}`;
+    mockUpstream({ statusCode: 200, body: hugeBody });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("skipping api.github.com URL rewrite"));
+    warnSpy.mockRestore();
+  });
+
   it("uses the incoming request's protocol and host as the proxy origin", async () => {
     const req = makeRequest({ url: "/notifications", protocol: "http", host: "localhost:8080" });
     const res = makeResponse();

@@ -228,8 +228,14 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         }
         totalBuffered += chunk.length;
         if (totalBuffered > MAX_BUFFER_BYTES) {
-          // Too large to cache: flush buffered data directly and stop accumulating
+          // Too large to buffer: flush the data seen so far directly and stop accumulating.
+          // This also means the body (unlike the headers just below) cannot be scanned for
+          // embedded api.github.com URLs, so surface that so a silent bypass is observable.
           overflowed = true;
+          console.warn(
+            `Proxy: JSON response for ${req.method} ${req.path} exceeded ${MAX_BUFFER_BYTES} bytes; ` +
+              "skipping api.github.com URL rewrite for the response body (headers were still rewritten).",
+          );
           const overflowHeaders = rewriteProxyHeaders(proxyRes.headers);
           delete overflowHeaders["transfer-encoding"];
           res.writeHead(proxyRes.statusCode ?? 502, overflowHeaders);
