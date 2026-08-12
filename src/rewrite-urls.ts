@@ -31,6 +31,7 @@ export function rewriteEmbeddedApiGithubUrls(text: string, proxyOrigin: string):
 function walkAndRewrite(value: unknown, proxyOrigin: string, changed: { value: boolean }, depth = 0): unknown {
   if (depth > MAX_JSON_WALK_DEPTH) return value;
   if (typeof value === "string") {
+    if (!value.includes(GITHUB_API_HOST)) return value;
     const rewritten = rewriteEmbeddedApiGithubUrls(value, proxyOrigin);
     if (rewritten !== value) changed.value = true;
     return rewritten;
