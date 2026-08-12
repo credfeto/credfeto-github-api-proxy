@@ -23,6 +23,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - Tests confirming proxy correctly forwards gh run view jobs and log endpoints (issue #27)
 - ETag conditional requests and short-TTL response caching to reduce GitHub API rate-limit consumption
 - Log full upstream request/response detail (with Authorization redacted) when GitHub returns a 5xx for a proxied POST, to aid diagnosing intermittent PR-creation failures
+- Rewrite absolute api.github.com URLs back to the proxy's own host in responses (issue #65)
 ### Fixed
 - Automatically populate headRepositoryId in createPullRequest GraphQL mutations when omitted, preventing PR creation failures when gh CLI uses a non-github.com GH_HOST
 - Accept /api/v3/ prefix that gh CLI prepends for non-github.com hosts
