@@ -56,8 +56,8 @@ export function serializeBody(body: unknown): { hash: string; json: string | und
   return { hash: crypto.createHash("sha256").update(data).digest("hex"), json };
 }
 
-export function buildCacheKey(method: string, url: string, bodyHash: string, callerId: string): string {
-  return `${method}\0${url}\0${bodyHash}\0${callerId}`;
+export function buildCacheKey(method: string, url: string, bodyHash: string, callerId: string, proxyOrigin: string): string {
+  return `${method}\0${url}\0${bodyHash}\0${callerId}\0${proxyOrigin}`;
 }
 
 export function isCacheable(method: string, url: string, body: unknown): boolean {

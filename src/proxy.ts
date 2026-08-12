@@ -106,7 +106,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   if (responseCache !== undefined && isCacheable(req.method, req.url, req.body)) {
     const { hash: bodyHash, json } = serializeBody(req.body);
     preSerialisedBody = json;
-    cacheKey = buildCacheKey(req.method, req.url, bodyHash, callerId);
+    cacheKey = buildCacheKey(req.method, req.url, bodyHash, callerId, proxyOrigin);
 
     const cached = responseCache.getCachedResponse(cacheKey);
     if (cached !== undefined) {
