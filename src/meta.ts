@@ -9,18 +9,15 @@
  * the case for real api.github.com/meta, since that field is GHES-only.
  */
 
+import { parseJsonBody } from "./json.js";
+
 // gh CLI only needs a syntactically valid, recent-enough semver here — it never talks
 // to a real GHES instance through this proxy. Bump this if gh raises its minimum
 // supported GHES version and starts rejecting 3.30.0.
 const SYNTHETIC_INSTALLED_VERSION = "3.30.0";
 
 export function injectInstalledVersion(body: Buffer): Buffer {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body.toString("utf8"));
-  } catch {
-    return body;
-  }
+  const parsed = parseJsonBody(body.toString("utf8"));
 
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return body;

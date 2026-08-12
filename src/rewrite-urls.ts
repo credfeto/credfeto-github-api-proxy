@@ -9,6 +9,7 @@
  */
 
 import { MAX_JSON_WALK_DEPTH } from "./cache.js";
+import { parseJsonBody } from "./json.js";
 
 export const GITHUB_API_HOST = "api.github.com";
 
@@ -64,13 +65,7 @@ export function rewriteJsonBody(body: Buffer, proxyOrigin: string): Buffer {
     return body;
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body.toString("utf8"));
-  } catch {
-    return body;
-  }
-
+  const parsed = parseJsonBody(body.toString("utf8"));
   if (parsed === null || typeof parsed !== "object") {
     return body;
   }

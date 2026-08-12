@@ -192,14 +192,10 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     // ── 304 Not Modified: replay the previously cached body ──────────────
     if (proxyRes.statusCode === 304 && etagEntry !== undefined) {
       // 304 headers (e.g. updated rate-limit) override stale stored values. etagEntry.headers
-      // were already rewritten when stored, but proxyRes.headers are fresh from GitHub, so the
-      // merged set is rewritten again here (rewriting an already-rewritten value is a no-op).
-      const mergedHeaders = rewriteResponseHeaders(
-        { ...etagEntry.headers, ...(proxyRes.headers as Record<string, string | string[] | undefined>) },
-        proxyOrigin,
-      );
+      // were already rewritten when stored, so only the fresh proxyRes.headers need rewriting here.
       const replyHeaders: Record<string, string | string[] | number | undefined> = {
-        ...mergedHeaders,
+        ...etagEntry.headers,
+        ...rewriteResponseHeaders(proxyRes.headers as Record<string, string | string[] | undefined>, proxyOrigin),
         "content-length": etagEntry.body.length,
       };
       delete replyHeaders["transfer-encoding"];
