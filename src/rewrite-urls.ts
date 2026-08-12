@@ -8,6 +8,8 @@
  * they never contain the api.github.com host this module matches on.
  */
 
+const GITHUB_API_HOST = "api.github.com";
+
 // Host-boundary aware: matches "https://api.github.com" only when the host
 // name actually ends there, so "https://api.github.com.evil.com/..." (a
 // different host that merely starts with the same characters) is left alone.
@@ -27,19 +29,25 @@ export function rewriteEmbeddedApiGithubUrls(text: string, proxyOrigin: string):
   return text.replace(API_GITHUB_URL_PATTERN, () => proxyOrigin);
 }
 
-function walkAndRewrite(value: unknown, proxyOrigin: string, changed: { value: boolean }): unknown {
+// Mirrors the recursion-depth guard cache.ts's sortJsonKeys applies when
+// walking a parsed response body, so pathological nesting within the 4MB
+// buffer cap can't blow the call stack.
+const MAX_WALK_DEPTH = 50;
+
+function walkAndRewrite(value: unknown, proxyOrigin: string, changed: { value: boolean }, depth = 0): unknown {
+  if (depth > MAX_WALK_DEPTH) return value;
   if (typeof value === "string") {
     const rewritten = rewriteEmbeddedApiGithubUrls(value, proxyOrigin);
     if (rewritten !== value) changed.value = true;
     return rewritten;
   }
   if (Array.isArray(value)) {
-    return value.map((item) => walkAndRewrite(item, proxyOrigin, changed));
+    return value.map((item) => walkAndRewrite(item, proxyOrigin, changed, depth + 1));
   }
   if (value !== null && typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      result[key] = walkAndRewrite(val, proxyOrigin, changed);
+      result[key] = walkAndRewrite(val, proxyOrigin, changed, depth + 1);
     }
     return result;
   }
@@ -53,6 +61,12 @@ function walkAndRewrite(value: unknown, proxyOrigin: string, changed: { value: b
  * original Buffer is returned as-is when nothing needed rewriting.
  */
 export function rewriteJsonBody(body: Buffer, proxyOrigin: string): Buffer {
+  // Cheap pre-check: skip the parse/walk/stringify pass entirely for the
+  // common case of a response with no api.github.com occurrence at all.
+  if (!body.includes(GITHUB_API_HOST)) {
+    return body;
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(body.toString("utf8"));

@@ -234,7 +234,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
           // Too large to cache: flush buffered data directly and stop accumulating
           overflowed = true;
           const overflowHeaders = rewriteResponseHeaders(
-            { ...(proxyRes.headers as Record<string, string | string[] | undefined>) },
+            proxyRes.headers as Record<string, string | string[] | undefined>,
             proxyOrigin,
           );
           delete overflowHeaders["transfer-encoding"];
@@ -257,7 +257,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         const statusCode = proxyRes.statusCode ?? 200;
         const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
         const responseHeaders: Record<string, string | string[] | undefined> = rewriteResponseHeaders(
-          { ...(proxyRes.headers as Record<string, string | string[] | undefined>) },
+          proxyRes.headers as Record<string, string | string[] | undefined>,
           proxyOrigin,
         );
         delete responseHeaders["transfer-encoding"];
