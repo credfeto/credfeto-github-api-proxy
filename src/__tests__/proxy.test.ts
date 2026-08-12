@@ -21,11 +21,12 @@ function makeRequest(opts: {
   extraHeaders?: Record<string, string>;
   protocol?: string;
   host?: string;
+  omitHost?: boolean;
 }): Request {
   const method = opts.method ?? "GET";
   const url = opts.url ?? "/repos/alice/myrepo/issues";
   const protocol = opts.protocol ?? "https";
-  const host = opts.host ?? PROXY_HOST;
+  const host = opts.omitHost === true ? undefined : (opts.host ?? PROXY_HOST);
   return {
     method,
     url,
@@ -961,5 +962,19 @@ describe("forwardToGitHub: api.github.com URL rewriting", () => {
 
     const headers = capturedResponseHeaders(res);
     expect(headers?.["content-length"]).toBe("1234");
+  });
+});
+
+describe("forwardToGitHub — request validation", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("rejects a request with no Host header instead of building a corrupt proxy origin", () => {
+    const req = makeRequest({ omitHost: true });
+    const res = makeResponse();
+
+    forwardToGitHub(req, res as unknown as Response);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("Host") }));
   });
 });

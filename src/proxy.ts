@@ -91,9 +91,15 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   }
   const callerId: string = typeof res.locals.callerId === "string" ? res.locals.callerId : "";
 
+  const requestHost = req.get("host");
+  if (requestHost === undefined) {
+    res.status(400).json({ message: "Bad request: missing Host header" });
+    return;
+  }
+
   // Everything that points back to api.github.com must be rewritten to point back at
   // the proxy, so clients following a URL from a response never bypass it.
-  const proxyOrigin = `${req.protocol}://${req.get("host")}`;
+  const proxyOrigin = `${req.protocol}://${requestHost}`;
   const rewriteProxyHeaders = (h: http.IncomingHttpHeaders): Record<string, string | string[] | undefined> =>
     rewriteResponseHeaders(h as Record<string, string | string[] | undefined>, proxyOrigin);
 
