@@ -216,7 +216,10 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
       : "";
     const isJsonResponse = contentType.includes("application/json") || contentType.includes("application/graphql");
 
-    if (isJsonResponse) {
+    // HEAD responses never carry a body, so buffering one yields an empty body and
+    // would overwrite the upstream Content-Length with 0. Fall through to the
+    // pipe-through path below, which preserves the real upstream headers.
+    if (req.method !== "HEAD" && isJsonResponse) {
       const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
       let totalBuffered = 0;
       let overflowed = false;

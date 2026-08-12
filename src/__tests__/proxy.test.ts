@@ -950,4 +950,16 @@ describe("forwardToGitHub: api.github.com URL rewriting", () => {
     const parsed = JSON.parse(res._body!.toString("utf8")) as { url: string };
     expect(parsed.url).toBe("http://localhost:8080/notifications/threads/1");
   });
+
+  it("preserves the upstream Content-Length on a HEAD response instead of buffering it as empty", async () => {
+    const req = makeRequest({ method: "HEAD", url: "/repos/alice/myrepo/issues" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, headers: { "content-length": "1234" } });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const headers = capturedResponseHeaders(res);
+    expect(headers?.["content-length"]).toBe("1234");
+  });
 });
