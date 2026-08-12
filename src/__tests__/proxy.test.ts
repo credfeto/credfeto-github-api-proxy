@@ -62,6 +62,12 @@ function makeResponse(callerId = "test-caller"): FakeResponse {
   return res as unknown as FakeResponse;
 }
 
+/** Returns the headers object passed to the response's first res.writeHead call. */
+function capturedResponseHeaders(res: FakeResponse): Record<string, unknown> {
+  const writeHeadCall = (res.writeHead as ReturnType<typeof vi.fn>).mock.calls[0];
+  return writeHeadCall?.[1] as Record<string, unknown>;
+}
+
 /** Returns a promise that resolves the next time res.end is called. */
 function awaitEnd(res: FakeResponse): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -843,8 +849,7 @@ describe("forwardToGitHub: api.github.com URL rewriting", () => {
     forwardToGitHub(req, res as unknown as Response, cache);
     await done;
 
-    const writeHeadCall = (res.writeHead as ReturnType<typeof vi.fn>).mock.calls[0];
-    const headers = writeHeadCall?.[1] as Record<string, unknown>;
+    const headers = capturedResponseHeaders(res);
     expect(headers?.link).toBe(
       `<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next", <${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=5>; rel="last"`,
     );
@@ -865,8 +870,7 @@ describe("forwardToGitHub: api.github.com URL rewriting", () => {
     forwardToGitHub(req, res as unknown as Response);
     await done;
 
-    const writeHeadCall = (res.writeHead as ReturnType<typeof vi.fn>).mock.calls[0];
-    const headers = writeHeadCall?.[1] as Record<string, unknown>;
+    const headers = capturedResponseHeaders(res);
     expect(headers?.link).toBe(`<${PROXY_ORIGIN}/repos/alice/myrepo/releases/1/assets?page=2>; rel="next"`);
     expect(res._body?.toString()).toBe("binary-data");
   });
@@ -900,8 +904,7 @@ describe("forwardToGitHub: api.github.com URL rewriting", () => {
     forwardToGitHub(req, res as unknown as Response, cache);
     await done;
 
-    const writeHeadCall = (res.writeHead as ReturnType<typeof vi.fn>).mock.calls[0];
-    const headers = writeHeadCall?.[1] as Record<string, unknown>;
+    const headers = capturedResponseHeaders(res);
     expect(headers?.link).toBe(`<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next"`);
   });
 
@@ -918,8 +921,7 @@ describe("forwardToGitHub: api.github.com URL rewriting", () => {
     forwardToGitHub(req, res as unknown as Response);
     await done;
 
-    const writeHeadCall = (res.writeHead as ReturnType<typeof vi.fn>).mock.calls[0];
-    const headers = writeHeadCall?.[1] as Record<string, unknown>;
+    const headers = capturedResponseHeaders(res);
     expect(headers?.link).toBe(`<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next"`);
   });
 
