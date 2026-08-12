@@ -1,7 +1,11 @@
 import crypto from "crypto";
 
+// Shared with rewrite-urls.ts's walkAndRewrite, which walks the same kind of
+// parsed JSON body and must stay in lock-step on how deep is too deep.
+export const MAX_JSON_WALK_DEPTH = 50;
+
 function sortJsonKeys(val: unknown, depth = 0): unknown {
-  if (depth > 50) return val;
+  if (depth > MAX_JSON_WALK_DEPTH) return val;
   if (val === null || typeof val !== "object") return val;
   if (Array.isArray(val)) return val.map((v) => sortJsonKeys(v, depth + 1));
   const obj = val as Record<string, unknown>;

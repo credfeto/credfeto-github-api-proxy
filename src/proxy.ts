@@ -10,9 +10,8 @@ import {
   buildCacheKey,
 } from "./cache.js";
 import { injectInstalledVersion } from "./meta.js";
-import { rewriteJsonBody, rewriteResponseHeaders } from "./rewrite-urls.js";
+import { GITHUB_API_HOST, rewriteJsonBody, rewriteResponseHeaders } from "./rewrite-urls.js";
 
-const GITHUB_API_HOST = "api.github.com";
 const GITHUB_UPLOADS_HOST = "uploads.github.com";
 
 const REDACTED = "[REDACTED]";

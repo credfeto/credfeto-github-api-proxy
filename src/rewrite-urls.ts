@@ -8,7 +8,9 @@
  * they never contain the api.github.com host this module matches on.
  */
 
-const GITHUB_API_HOST = "api.github.com";
+import { MAX_JSON_WALK_DEPTH } from "./cache.js";
+
+export const GITHUB_API_HOST = "api.github.com";
 
 // Host-boundary aware: matches "https://api.github.com" only when the host
 // name actually ends there, so "https://api.github.com.evil.com/..." (a
@@ -29,13 +31,8 @@ export function rewriteEmbeddedApiGithubUrls(text: string, proxyOrigin: string):
   return text.replace(API_GITHUB_URL_PATTERN, () => proxyOrigin);
 }
 
-// Mirrors the recursion-depth guard cache.ts's sortJsonKeys applies when
-// walking a parsed response body, so pathological nesting within the 4MB
-// buffer cap can't blow the call stack.
-const MAX_WALK_DEPTH = 50;
-
 function walkAndRewrite(value: unknown, proxyOrigin: string, changed: { value: boolean }, depth = 0): unknown {
-  if (depth > MAX_WALK_DEPTH) return value;
+  if (depth > MAX_JSON_WALK_DEPTH) return value;
   if (typeof value === "string") {
     const rewritten = rewriteEmbeddedApiGithubUrls(value, proxyOrigin);
     if (rewritten !== value) changed.value = true;
@@ -84,23 +81,29 @@ export function rewriteJsonBody(body: Buffer, proxyOrigin: string): Buffer {
   return Buffer.from(JSON.stringify(rewritten), "utf8");
 }
 
+// Cheap pre-check mirroring rewriteJsonBody's: most header values (date, etag,
+// x-ratelimit-*, ...) never contain the host, so skip the regex pass for them.
+function rewriteIfPresent(value: string, proxyOrigin: string): string {
+  return value.includes(GITHUB_API_HOST) ? rewriteEmbeddedApiGithubUrls(value, proxyOrigin) : value;
+}
+
 /**
  * Rewrites embedded api.github.com URLs in every header value, including
  * multi-value headers such as Link.
  */
-export function rewriteResponseHeaders<T extends Record<string, string | string[] | undefined>>(
-  headers: T,
+export function rewriteResponseHeaders(
+  headers: Record<string, string | string[] | undefined>,
   proxyOrigin: string,
-): T {
+): Record<string, string | string[] | undefined> {
   const result: Record<string, string | string[] | undefined> = {};
   for (const [key, value] of Object.entries(headers)) {
     if (typeof value === "string") {
-      result[key] = rewriteEmbeddedApiGithubUrls(value, proxyOrigin);
+      result[key] = rewriteIfPresent(value, proxyOrigin);
     } else if (Array.isArray(value)) {
-      result[key] = value.map((v) => rewriteEmbeddedApiGithubUrls(v, proxyOrigin));
+      result[key] = value.map((v) => rewriteIfPresent(v, proxyOrigin));
     } else {
       result[key] = value;
     }
   }
-  return result as T;
+  return result;
 }
