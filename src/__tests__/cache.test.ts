@@ -83,38 +83,46 @@ describe("hashBody", () => {
 
 describe("buildCacheKey", () => {
   it("produces a stable key for the same inputs", () => {
-    const key = buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc123", "caller-1");
-    expect(buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc123", "caller-1")).toBe(key);
+    const key = buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc123", "caller-1", "https://proxy.example.com");
+    expect(buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc123", "caller-1", "https://proxy.example.com")).toBe(key);
   });
 
   it("different callers produce different keys", () => {
-    const a = buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc", "caller-1");
-    const b = buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc", "caller-2");
+    const a = buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc", "caller-1", "https://proxy.example.com");
+    const b = buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc", "caller-2", "https://proxy.example.com");
     expect(a).not.toBe(b);
   });
 
   it("different methods produce different keys", () => {
-    const a = buildCacheKey("GET", "/graphql", "abc", "caller");
-    const b = buildCacheKey("POST", "/graphql", "abc", "caller");
+    const a = buildCacheKey("GET", "/graphql", "abc", "caller", "https://proxy.example.com");
+    const b = buildCacheKey("POST", "/graphql", "abc", "caller", "https://proxy.example.com");
     expect(a).not.toBe(b);
   });
 
   it("different URLs produce different keys", () => {
-    const a = buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc", "caller");
-    const b = buildCacheKey("GET", "/repos/alice/myrepo/pulls", "abc", "caller");
+    const a = buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc", "caller", "https://proxy.example.com");
+    const b = buildCacheKey("GET", "/repos/alice/myrepo/pulls", "abc", "caller", "https://proxy.example.com");
     expect(a).not.toBe(b);
   });
 
   it("different body hashes produce different keys", () => {
-    const a = buildCacheKey("POST", "/graphql", "hash-a", "caller");
-    const b = buildCacheKey("POST", "/graphql", "hash-b", "caller");
+    const a = buildCacheKey("POST", "/graphql", "hash-a", "caller", "https://proxy.example.com");
+    const b = buildCacheKey("POST", "/graphql", "hash-b", "caller", "https://proxy.example.com");
     expect(a).not.toBe(b);
   });
 
-  it("includes all four components so partial matches do not collide", () => {
+  it("different proxy origins produce different keys", () => {
+    // Guards against cache poisoning/staleness across Host headers: a response body/headers
+    // rewritten for one proxyOrigin must never be served back for a request bearing another.
+    const a = buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc", "caller", "https://proxy-one.example.com");
+    const b = buildCacheKey("GET", "/repos/alice/myrepo/issues", "abc", "caller", "https://proxy-two.example.com");
+    expect(a).not.toBe(b);
+  });
+
+  it("includes all five components so partial matches do not collide", () => {
     // Ensure 'method+url' from one entry can't alias 'method'+url' from another.
-    const a = buildCacheKey("GET\0/x", "", "", "");
-    const b = buildCacheKey("GET", "/x", "", "");
+    const a = buildCacheKey("GET\0/x", "", "", "", "");
+    const b = buildCacheKey("GET", "/x", "", "", "");
     expect(a).not.toBe(b);
   });
 });

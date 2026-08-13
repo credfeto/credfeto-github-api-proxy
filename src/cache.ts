@@ -1,7 +1,9 @@
 import crypto from "crypto";
 
+import { MAX_JSON_WALK_DEPTH } from "./json.js";
+
 function sortJsonKeys(val: unknown, depth = 0): unknown {
-  if (depth > 50) return val;
+  if (depth > MAX_JSON_WALK_DEPTH) return val;
   if (val === null || typeof val !== "object") return val;
   if (Array.isArray(val)) return val.map((v) => sortJsonKeys(v, depth + 1));
   const obj = val as Record<string, unknown>;
@@ -52,8 +54,8 @@ export function serializeBody(body: unknown): { hash: string; json: string | und
   return { hash: crypto.createHash("sha256").update(data).digest("hex"), json };
 }
 
-export function buildCacheKey(method: string, url: string, bodyHash: string, callerId: string): string {
-  return `${method}\0${url}\0${bodyHash}\0${callerId}`;
+export function buildCacheKey(method: string, url: string, bodyHash: string, callerId: string, proxyOrigin: string): string {
+  return `${method}\0${url}\0${bodyHash}\0${callerId}\0${proxyOrigin}`;
 }
 
 export function isCacheable(method: string, url: string, body: unknown): boolean {

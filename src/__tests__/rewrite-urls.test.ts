@@ -1,0 +1,144 @@
+import { describe, it, expect } from "vitest";
+import { rewriteEmbeddedApiGithubUrls, rewriteJsonBody, rewriteResponseHeaders } from "../rewrite-urls.js";
+
+const PROXY_ORIGIN = "https://proxy.example.com";
+
+describe("rewriteEmbeddedApiGithubUrls", () => {
+  it("rewrites a bare api.github.com URL preserving path and query", () => {
+    const result = rewriteEmbeddedApiGithubUrls(
+      "https://api.github.com/repos/alice/myrepo/issues?page=2",
+      PROXY_ORIGIN,
+    );
+    expect(result).toBe(`${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2`);
+  });
+
+  it("rewrites multiple URLs embedded in one string (Link header shape)", () => {
+    const input =
+      '<https://api.github.com/repos/alice/myrepo/issues?page=2>; rel="next", <https://api.github.com/repos/alice/myrepo/issues?page=5>; rel="last"';
+    const result = rewriteEmbeddedApiGithubUrls(input, PROXY_ORIGIN);
+    expect(result).toBe(
+      `<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next", <${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=5>; rel="last"`,
+    );
+  });
+
+  it("rewrites a URL with an explicit port", () => {
+    const result = rewriteEmbeddedApiGithubUrls("https://api.github.com:443/repos/alice/myrepo", PROXY_ORIGIN);
+    expect(result).toBe(`${PROXY_ORIGIN}:443/repos/alice/myrepo`);
+  });
+
+  it("rewrites a bare host with no trailing path", () => {
+    const result = rewriteEmbeddedApiGithubUrls("https://api.github.com", PROXY_ORIGIN);
+    expect(result).toBe(PROXY_ORIGIN);
+  });
+
+  it("leaves html_url (github.com web host) untouched", () => {
+    const input = "https://github.com/alice/myrepo/issues/1";
+    expect(rewriteEmbeddedApiGithubUrls(input, PROXY_ORIGIN)).toBe(input);
+  });
+
+  it("leaves a lookalike host that merely starts with api.github.com untouched", () => {
+    const input = "https://api.github.com.evil.com/phish";
+    expect(rewriteEmbeddedApiGithubUrls(input, PROXY_ORIGIN)).toBe(input);
+  });
+
+  it("leaves plain text with no URL untouched", () => {
+    expect(rewriteEmbeddedApiGithubUrls("no urls here", PROXY_ORIGIN)).toBe("no urls here");
+  });
+
+  it("treats a proxyOrigin containing $-patterns as a literal replacement, not a substitution token", () => {
+    const trickyOrigin = "https://evil$&$1$`$'.example.com";
+    const result = rewriteEmbeddedApiGithubUrls("https://api.github.com/repos/alice/myrepo", trickyOrigin);
+    expect(result).toBe(`${trickyOrigin}/repos/alice/myrepo`);
+  });
+});
+
+describe("rewriteJsonBody", () => {
+  it("rewrites a top-level field", () => {
+    const body = Buffer.from(JSON.stringify({ url: "https://api.github.com/repos/alice/myrepo" }));
+    const result = rewriteJsonBody(body, PROXY_ORIGIN);
+    expect(JSON.parse(result.toString("utf8"))).toStrictEqual({ url: `${PROXY_ORIGIN}/repos/alice/myrepo` });
+  });
+
+  it("rewrites a nested field", () => {
+    const body = Buffer.from(
+      JSON.stringify({ subject: { url: "https://api.github.com/notifications/threads/1" } }),
+    );
+    const result = rewriteJsonBody(body, PROXY_ORIGIN);
+    expect(JSON.parse(result.toString("utf8"))).toStrictEqual({
+      subject: { url: `${PROXY_ORIGIN}/notifications/threads/1` },
+    });
+  });
+
+  it("rewrites values embedded in arrays", () => {
+    const body = Buffer.from(
+      JSON.stringify([{ url: "https://api.github.com/repos/alice/myrepo/issues/1" }]),
+    );
+    const result = rewriteJsonBody(body, PROXY_ORIGIN);
+    expect(JSON.parse(result.toString("utf8"))).toStrictEqual([
+      { url: `${PROXY_ORIGIN}/repos/alice/myrepo/issues/1` },
+    ]);
+  });
+
+  it("leaves html_url untouched alongside a rewritten url field", () => {
+    const body = Buffer.from(
+      JSON.stringify({
+        url: "https://api.github.com/repos/alice/myrepo/issues/1",
+        html_url: "https://github.com/alice/myrepo/issues/1",
+      }),
+    );
+    const result = rewriteJsonBody(body, PROXY_ORIGIN);
+    expect(JSON.parse(result.toString("utf8"))).toStrictEqual({
+      url: `${PROXY_ORIGIN}/repos/alice/myrepo/issues/1`,
+      html_url: "https://github.com/alice/myrepo/issues/1",
+    });
+  });
+
+  it("returns the original buffer unchanged when malformed JSON is given", () => {
+    const body = Buffer.from("not json{");
+    expect(rewriteJsonBody(body, PROXY_ORIGIN)).toBe(body);
+  });
+
+  it("returns the original buffer unchanged for a top-level JSON primitive", () => {
+    const body = Buffer.from(JSON.stringify("just a string"));
+    expect(rewriteJsonBody(body, PROXY_ORIGIN)).toBe(body);
+  });
+
+  it("returns the original buffer unchanged when nothing needed rewriting", () => {
+    const body = Buffer.from(JSON.stringify({ html_url: "https://github.com/alice/myrepo" }));
+    expect(rewriteJsonBody(body, PROXY_ORIGIN)).toBe(body);
+  });
+});
+
+describe("rewriteResponseHeaders", () => {
+  it("rewrites a string header value", () => {
+    const headers = { location: "https://api.github.com/repos/alice/myrepo/issues/1" };
+    const result = rewriteResponseHeaders(headers, PROXY_ORIGIN);
+    expect(result.location).toBe(`${PROXY_ORIGIN}/repos/alice/myrepo/issues/1`);
+  });
+
+  it("rewrites each entry of a multi-value header", () => {
+    const headers = {
+      link: [
+        '<https://api.github.com/repos/alice/myrepo/issues?page=2>; rel="next"',
+        '<https://api.github.com/repos/alice/myrepo/issues?page=5>; rel="last"',
+      ],
+    };
+    const result = rewriteResponseHeaders(headers, PROXY_ORIGIN);
+    expect(result.link).toStrictEqual([
+      `<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next"`,
+      `<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=5>; rel="last"`,
+    ]);
+  });
+
+  it("leaves unrelated headers untouched", () => {
+    const headers = { "content-type": "application/json", "x-ratelimit-remaining": "59" };
+    const result = rewriteResponseHeaders(headers, PROXY_ORIGIN);
+    expect(result).toStrictEqual(headers);
+  });
+
+  it("preserves an undefined-valued header entry", () => {
+    const headers = { "content-type": "application/json", "if-none-match": undefined };
+    const result = rewriteResponseHeaders(headers, PROXY_ORIGIN);
+    expect(result["if-none-match"]).toBeUndefined();
+  });
+});
