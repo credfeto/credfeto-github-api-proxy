@@ -6,8 +6,7 @@
 // html_url fields (github.com, the web UI) are untouched by construction: they
 // never contain the api.github.com host this module matches on.
 
-import { MAX_JSON_WALK_DEPTH } from "./cache.js";
-import { parseJsonBody } from "./json.js";
+import { MAX_JSON_WALK_DEPTH, parseJsonBody } from "./json.js";
 
 export const GITHUB_API_HOST = "api.github.com";
 
@@ -28,25 +27,33 @@ export function rewriteEmbeddedApiGithubUrls(text: string, proxyOrigin: string):
   return text.replace(API_GITHUB_URL_PATTERN, () => proxyOrigin);
 }
 
-function walkAndRewrite(value: unknown, proxyOrigin: string, changed: { value: boolean }, depth = 0): unknown {
-  if (depth > MAX_JSON_WALK_DEPTH) return value;
+function walkAndRewrite(value: unknown, proxyOrigin: string, depth = 0): [unknown, boolean] {
+  if (depth > MAX_JSON_WALK_DEPTH) return [value, false];
   if (typeof value === "string") {
-    if (!value.includes(GITHUB_API_HOST)) return value;
+    if (!value.includes(GITHUB_API_HOST)) return [value, false];
     const rewritten = rewriteEmbeddedApiGithubUrls(value, proxyOrigin);
-    if (rewritten !== value) changed.value = true;
-    return rewritten;
+    return [rewritten, rewritten !== value];
   }
   if (Array.isArray(value)) {
-    return value.map((item) => walkAndRewrite(item, proxyOrigin, changed, depth + 1));
+    let changed = false;
+    const result = value.map((item) => {
+      const [rewrittenItem, itemChanged] = walkAndRewrite(item, proxyOrigin, depth + 1);
+      if (itemChanged) changed = true;
+      return rewrittenItem;
+    });
+    return [result, changed];
   }
   if (value !== null && typeof value === "object") {
+    let changed = false;
     const result: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      result[key] = walkAndRewrite(val, proxyOrigin, changed, depth + 1);
+      const [rewrittenVal, valChanged] = walkAndRewrite(val, proxyOrigin, depth + 1);
+      if (valChanged) changed = true;
+      result[key] = rewrittenVal;
     }
-    return result;
+    return [result, changed];
   }
-  return value;
+  return [value, false];
 }
 
 // Parses `body` as JSON, recursively rewrites every embedded api.github.com
@@ -65,9 +72,8 @@ export function rewriteJsonBody(body: Buffer, proxyOrigin: string): Buffer {
     return body;
   }
 
-  const changed = { value: false };
-  const rewritten = walkAndRewrite(parsed, proxyOrigin, changed);
-  if (!changed.value) return body;
+  const [rewritten, changed] = walkAndRewrite(parsed, proxyOrigin);
+  if (!changed) return body;
   return Buffer.from(JSON.stringify(rewritten), "utf8");
 }
 

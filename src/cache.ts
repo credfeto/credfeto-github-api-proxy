@@ -1,7 +1,6 @@
 import crypto from "crypto";
 
-// Guards against pathological/cyclic depth when recursively walking a parsed JSON body.
-export const MAX_JSON_WALK_DEPTH = 50;
+import { MAX_JSON_WALK_DEPTH } from "./json.js";
 
 function sortJsonKeys(val: unknown, depth = 0): unknown {
   if (depth > MAX_JSON_WALK_DEPTH) return val;
