@@ -226,7 +226,14 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
     // would overwrite the upstream Content-Length with 0. Fall through to the
     // pipe-through path below, which preserves the real upstream headers.
     if (req.method !== "HEAD" && isJsonResponse) {
-      const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
+      // Cache-store cutoff: bodies at or below this are small enough to keep in the
+      // in-memory response cache. This is independent of whether they can be rewritten.
+      const MAX_CACHE_BYTES = 4 * 1024 * 1024;
+      // Rewrite-buffer cutoff: URL rewriting needs the whole body parsed as JSON, so we
+      // buffer up to this much larger ceiling even for bodies too big to cache, rather
+      // than silently skipping the rewrite for every response above MAX_CACHE_BYTES.
+      // Only bodies beyond this ceiling fall back to a raw, unrewritten pass-through.
+      const MAX_REWRITE_BYTES = 32 * 1024 * 1024;
       let totalBuffered = 0;
       let overflowed = false;
       const chunks: Buffer[] = [];
@@ -236,13 +243,14 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
           return;
         }
         totalBuffered += chunk.length;
-        if (totalBuffered > MAX_BUFFER_BYTES) {
-          // Too large to buffer: flush the data seen so far directly and stop accumulating.
-          // This also means the body (unlike the headers just below) cannot be scanned for
-          // embedded api.github.com URLs, so surface that so a silent bypass is observable.
+        if (totalBuffered > MAX_REWRITE_BYTES) {
+          // Too large to buffer for rewriting: flush the data seen so far directly and stop
+          // accumulating. This also means the body (unlike the headers just below) cannot be
+          // scanned for embedded api.github.com URLs, so surface that so a silent bypass is
+          // observable.
           overflowed = true;
           console.warn(
-            `Proxy: JSON response for ${req.method} ${req.path} exceeded ${MAX_BUFFER_BYTES} bytes; ` +
+            `Proxy: JSON response for ${req.method} ${req.path} exceeded ${MAX_REWRITE_BYTES} bytes; ` +
               "skipping api.github.com URL rewrite for the response body (headers were still rewritten).",
           );
           const overflowHeaders = rewriteProxyHeaders(proxyRes.headers);
@@ -267,7 +275,16 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
         const responseHeaders: Record<string, string | string[] | undefined> = rewriteProxyHeaders(proxyRes.headers);
         delete responseHeaders["transfer-encoding"];
-        if (cacheKey !== undefined && responseCache !== undefined && statusCode >= 200 && statusCode < 300) {
+        // Only cache bodies small enough to keep the cache's memory footprint bounded.
+        // Bodies between MAX_CACHE_BYTES and MAX_REWRITE_BYTES are still rewritten and
+        // served correctly above, just not stored.
+        if (
+          cacheKey !== undefined &&
+          responseCache !== undefined &&
+          statusCode >= 200 &&
+          statusCode < 300 &&
+          rawBody.length <= MAX_CACHE_BYTES
+        ) {
           const cachedResponse: CachedResponse = {
             statusCode,
             headers: responseHeaders,

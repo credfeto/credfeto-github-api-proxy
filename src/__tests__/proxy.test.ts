@@ -909,10 +909,31 @@ describe("forwardToGitHub: api.github.com URL rewriting", () => {
     expect(headers?.link).toBe(`<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next"`);
   });
 
-  it("rewrites headers in the overflow branch when a JSON response exceeds the buffer limit", async () => {
+  it("rewrites the body and headers, but skips caching, for a JSON response above the cache limit but within the rewrite limit", async () => {
+    const cache = makeCache();
     const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
     const res = makeResponse();
-    const hugeBody = `{"data":"${"x".repeat(4 * 1024 * 1024 + 10)}"}`;
+    const largeBody = `{"url":"https://api.github.com/repos/alice/myrepo/issues/1","data":"${"x".repeat(4 * 1024 * 1024 + 10)}"}`;
+    mockUpstream({
+      statusCode: 200,
+      headers: { link: '<https://api.github.com/repos/alice/myrepo/issues?page=2>; rel="next"' },
+      body: largeBody,
+    });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, cache);
+    await done;
+
+    const headers = capturedResponseHeaders(res);
+    expect(headers?.link).toBe(`<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next"`);
+    const parsed = JSON.parse(res._body!.toString("utf8")) as { url: string };
+    expect(parsed.url).toBe(`${PROXY_ORIGIN}/repos/alice/myrepo/issues/1`);
+    expect(cache.store).not.toHaveBeenCalled();
+  });
+
+  it("rewrites headers in the overflow branch when a JSON response exceeds the rewrite limit", async () => {
+    const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
+    const res = makeResponse();
+    const hugeBody = `{"data":"${"x".repeat(32 * 1024 * 1024 + 10)}"}`;
     mockUpstream({
       statusCode: 200,
       headers: { link: '<https://api.github.com/repos/alice/myrepo/issues?page=2>; rel="next"' },
@@ -926,10 +947,10 @@ describe("forwardToGitHub: api.github.com URL rewriting", () => {
     expect(headers?.link).toBe(`<${PROXY_ORIGIN}/repos/alice/myrepo/issues?page=2>; rel="next"`);
   });
 
-  it("warns that URL rewriting was skipped when a JSON response overflows the buffer limit", async () => {
+  it("warns that URL rewriting was skipped when a JSON response overflows the rewrite limit", async () => {
     const req = makeRequest({ url: "/repos/alice/myrepo/issues" });
     const res = makeResponse();
-    const hugeBody = `{"url":"https://api.github.com/repos/alice/myrepo","data":"${"x".repeat(4 * 1024 * 1024 + 10)}"}`;
+    const hugeBody = `{"url":"https://api.github.com/repos/alice/myrepo","data":"${"x".repeat(32 * 1024 * 1024 + 10)}"}`;
     mockUpstream({ statusCode: 200, body: hugeBody });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const done = awaitEnd(res);
