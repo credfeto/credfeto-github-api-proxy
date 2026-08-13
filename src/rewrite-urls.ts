@@ -13,7 +13,7 @@ export const GITHUB_API_HOST = "api.github.com";
 // Host-boundary aware: matches "https://api.github.com" only when the host
 // name actually ends there, so "https://api.github.com.evil.com/..." (a
 // different host that merely starts with the same characters) is left alone.
-const API_GITHUB_URL_PATTERN = /https:\/\/api\.github\.com(?![\w.-])/g;
+const API_GITHUB_URL_PATTERN = new RegExp(`https://${GITHUB_API_HOST.replace(/\./g, "\\.")}(?![\\w.-])`, "g");
 
 // Rewrites every occurrence of an absolute https://api.github.com URL found
 // anywhere in `text` to `proxyOrigin`, preserving path/query. Handles both a
@@ -30,8 +30,7 @@ export function rewriteEmbeddedApiGithubUrls(text: string, proxyOrigin: string):
 function walkAndRewrite(value: unknown, proxyOrigin: string, depth = 0): [unknown, boolean] {
   if (depth > MAX_JSON_WALK_DEPTH) return [value, false];
   if (typeof value === "string") {
-    if (!value.includes(GITHUB_API_HOST)) return [value, false];
-    const rewritten = rewriteEmbeddedApiGithubUrls(value, proxyOrigin);
+    const rewritten = rewriteIfPresent(value, proxyOrigin);
     return [rewritten, rewritten !== value];
   }
   if (Array.isArray(value)) {
