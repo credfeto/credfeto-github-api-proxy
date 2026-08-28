@@ -42,10 +42,13 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - Updated GitHub Actions to Node.js 24 compatible versions: actions/checkout@v6.0.3, docker/setup-buildx-action@v4.1.0, docker/build-push-action@v7.2.0
 - Build uses esbuild to produce a single-file bundle with no node_modules in the runtime image
 - Migrated docker-compose.yml and deployment docs to support rootless Podman compose (issue #33)
+- Bump vitest from 4.1.8 to 4.1.11 and align @vitest/coverage-v8 to 4.1.11 to resolve npm peer-dependency conflict
 ### Deprecated
 ### Removed
 ### Deployment Changes
+
 <!--
 Releases that have at least been deployed to staging, BUT NOT necessarily released to live.  Changes should be moved from [Unreleased] into here as they are merged into the appropriate release branch
 -->
+
 ## [0.0.0] - Project created
