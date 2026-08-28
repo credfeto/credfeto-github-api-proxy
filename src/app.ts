@@ -122,7 +122,7 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   });
 
   // ── Forward everything else to GitHub ─────────────────────────────────────
-  app.all("*", (req: Request, res: Response) => { forwardToGitHub(req, res, responseCache); });
+  app.all("/*splat", (req: Request, res: Response) => { forwardToGitHub(req, res, responseCache); });
 
   return app;
 }
