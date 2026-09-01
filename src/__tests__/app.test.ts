@@ -190,6 +190,29 @@ describe("App integration", () => {
     expect(res.status).toBe(401);
   });
 
+  // ── Root path forwarding (gh auth login / auth status scope check) ───────
+  // `gh` validates a token's scopes with GET https://<host>/api/v3/, which
+  // strips to the bare root "/". An unbraced Express 5 wildcard route
+  // (`/*splat`) requires at least one path segment and 404s here instead of
+  // forwarding, breaking `gh auth login` and `gh auth status` on every host.
+
+  it("forwards GET / to GitHub", async () => {
+    const res = await request(app).get("/").set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.proxied).toBe(true);
+  });
+
+  it("forwards GET /api/v3/ (stripped to root) to GitHub", async () => {
+    const res = await request(app).get("/api/v3/").set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.proxied).toBe(true);
+  });
+
+  it("returns 401 for GET / with no token (auth still fires on root)", async () => {
+    const res = await request(app).get("/");
+    expect(res.status).toBe(401);
+  });
+
   // ── /api/graphql path handling (Enterprise GraphQL path) ─────────────────
   // gh CLI sends GraphQL to /api/graphql when GH_HOST is a non-github.com
   // host. It must be rewritten to /graphql and pass through the same auth,
