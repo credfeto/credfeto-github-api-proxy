@@ -122,7 +122,11 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   });
 
   // ── Forward everything else to GitHub ─────────────────────────────────────
-  app.all("/*splat", (req: Request, res: Response) => { forwardToGitHub(req, res, responseCache); });
+  // The wildcard is wrapped in {} to make it optional so this also matches the
+  // bare root path "/" (e.g. GET /api/v3/ stripped to "/", which gh's token
+  // scope check hits on every `gh auth login`/`gh auth status`). An unbraced
+  // `/*splat` requires at least one path segment and would 404 on root.
+  app.all("/{*splat}", (req: Request, res: Response) => { forwardToGitHub(req, res, responseCache); });
 
   return app;
 }
