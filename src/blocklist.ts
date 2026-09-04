@@ -23,7 +23,7 @@ export function sendBlockedResponse(res: Response, reason: string | undefined, e
   res.status(403).json({
     message: "Operation blocked by proxy policy",
     reason,
-    ...(extra ?? {}),
+    ...extra,
   });
 }
 
@@ -93,15 +93,14 @@ const BLOCKED_REST: Array<{ methods: string[]; pattern: RegExp; reason: string }
  * allowed. Non-git mutations (createIssue, addComment, etc.) are also
  * allowed. Keyed by mutation name so each gets its own reason text.
  */
+const gitObjectMutationReason = (name: string): string => `GraphQL mutation '${name}' creates or manipulates git objects`;
+
 const BLOCKED_GRAPHQL_MUTATIONS: ReadonlyMap<string, string> = new Map([
-  ["createCommitOnBranch", "GraphQL mutation 'createCommitOnBranch' creates or manipulates git objects"],
-  ["createRef", "GraphQL mutation 'createRef' creates or manipulates git objects"],
-  ["updateRef", "GraphQL mutation 'updateRef' creates or manipulates git objects"],
-  ["deleteRef", "GraphQL mutation 'deleteRef' creates or manipulates git objects"],
-  [
-    "mergeBranch",
-    "GraphQL mutation 'mergeBranch' merges a branch directly without going through a pull request",
-  ],
+  ["createCommitOnBranch", gitObjectMutationReason("createCommitOnBranch")],
+  ["createRef", gitObjectMutationReason("createRef")],
+  ["updateRef", gitObjectMutationReason("updateRef")],
+  ["deleteRef", gitObjectMutationReason("deleteRef")],
+  ["mergeBranch", "GraphQL mutation 'mergeBranch' merges a branch directly without going through a pull request"],
 ]);
 
 /** Check whether a REST request should be blocked. */

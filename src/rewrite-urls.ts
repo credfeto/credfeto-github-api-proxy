@@ -48,8 +48,15 @@ const denyAdminMergeVisitor: JsonVisitor = (value, key) => {
 // parse/walk/stringify pass, since every proxied JSON response body needs
 // both transforms applied and a GraphQL PR response commonly carries both an
 // api.github.com URL and viewerCanMergeAsAdmin.
-export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string): Buffer {
-  if (!body.includes(GITHUB_API_HOST) && !body.includes(VIEWER_CAN_MERGE_AS_ADMIN_FIELD)) {
+//
+// isGraphQLResponse gates the viewerCanMergeAsAdmin pre-check: that field only
+// ever appears in GraphQL PR responses, so skipping the extra body scan for it
+// on REST responses (the vast majority of traffic) avoids a second full
+// Buffer.includes() pass on every response that doesn't mention api.github.com.
+export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string, isGraphQLResponse = true): Buffer {
+  const mightRewriteUrls = body.includes(GITHUB_API_HOST);
+  const mightDenyAdminMerge = isGraphQLResponse && body.includes(VIEWER_CAN_MERGE_AS_ADMIN_FIELD);
+  if (!mightRewriteUrls && !mightDenyAdminMerge) {
     return body;
   }
 
