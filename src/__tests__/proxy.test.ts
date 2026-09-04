@@ -795,6 +795,29 @@ describe("forwardToGitHub: api.github.com URL rewriting", () => {
     expect(parsed.subject.url).toBe(`${PROXY_ORIGIN}/notifications/threads/1`);
   });
 
+  it("forces viewerCanMergeAsAdmin:true to false in a GraphQL JSON response", async () => {
+    const req = makeRequest({
+      method: "POST",
+      url: "/graphql",
+      path: "/graphql",
+      body: { query: `query { repository(owner:"a",name:"b") { pullRequest(number:1) { viewerCanMergeAsAdmin } } }` },
+      isJson: true,
+    });
+    const res = makeResponse();
+    mockUpstream({
+      statusCode: 200,
+      body: JSON.stringify({ data: { repository: { pullRequest: { viewerCanMergeAsAdmin: true } } } }),
+    });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as {
+      data: { repository: { pullRequest: { viewerCanMergeAsAdmin: boolean } } };
+    };
+    expect(parsed.data.repository.pullRequest.viewerCanMergeAsAdmin).toBe(false);
+  });
+
   it("stores the rewritten body in the cache so a later cache hit serves the rewritten form", async () => {
     const cache = makeCache();
     const req = makeRequest({ url: "/repos/alice/myrepo/issues" });

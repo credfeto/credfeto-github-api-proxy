@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { rewriteEmbeddedApiGithubUrls, rewriteJsonBody, rewriteResponseHeaders } from "../rewrite-urls.js";
+import {
+  rewriteEmbeddedApiGithubUrls,
+  rewriteJsonBody,
+  rewriteResponseHeaders,
+  denyAdminMergeCapability,
+} from "../rewrite-urls.js";
 
 const PROXY_ORIGIN = "https://proxy.example.com";
 
@@ -106,6 +111,58 @@ describe("rewriteJsonBody", () => {
   it("returns the original buffer unchanged when nothing needed rewriting", () => {
     const body = Buffer.from(JSON.stringify({ html_url: "https://github.com/alice/myrepo" }));
     expect(rewriteJsonBody(body, PROXY_ORIGIN)).toBe(body);
+  });
+});
+
+describe("denyAdminMergeCapability", () => {
+  it("forces a top-level viewerCanMergeAsAdmin:true to false", () => {
+    const body = Buffer.from(JSON.stringify({ viewerCanMergeAsAdmin: true }));
+    const result = denyAdminMergeCapability(body);
+    expect(JSON.parse(result.toString("utf8"))).toStrictEqual({ viewerCanMergeAsAdmin: false });
+  });
+
+  it("forces a deeply nested viewerCanMergeAsAdmin:true to false", () => {
+    const body = Buffer.from(
+      JSON.stringify({
+        data: { repository: { pullRequest: { number: 7, viewerCanMergeAsAdmin: true } } },
+      }),
+    );
+    const result = denyAdminMergeCapability(body);
+    expect(JSON.parse(result.toString("utf8"))).toStrictEqual({
+      data: { repository: { pullRequest: { number: 7, viewerCanMergeAsAdmin: false } } },
+    });
+  });
+
+  it("forces viewerCanMergeAsAdmin:true inside an array", () => {
+    const body = Buffer.from(
+      JSON.stringify({ nodes: [{ viewerCanMergeAsAdmin: true }, { viewerCanMergeAsAdmin: false }] }),
+    );
+    const result = denyAdminMergeCapability(body);
+    expect(JSON.parse(result.toString("utf8"))).toStrictEqual({
+      nodes: [{ viewerCanMergeAsAdmin: false }, { viewerCanMergeAsAdmin: false }],
+    });
+  });
+
+  it("leaves viewerCanMergeAsAdmin:false untouched (no unnecessary rewrite)", () => {
+    const body = Buffer.from(JSON.stringify({ viewerCanMergeAsAdmin: false }));
+    expect(denyAdminMergeCapability(body)).toBe(body);
+  });
+
+  it("fires even when the body has no api.github.com URL in it", () => {
+    const body = Buffer.from(JSON.stringify({ viewerCanMergeAsAdmin: true, number: 1 }));
+    expect(body.includes("api.github.com")).toBe(false);
+    const result = denyAdminMergeCapability(body);
+    expect(JSON.parse(result.toString("utf8")).viewerCanMergeAsAdmin).toBe(false);
+  });
+
+  it("returns the original buffer unchanged when the field is absent", () => {
+    const body = Buffer.from(JSON.stringify({ number: 1 }));
+    expect(denyAdminMergeCapability(body)).toBe(body);
+  });
+
+  it("returns the original buffer unchanged for malformed JSON", () => {
+    const body = Buffer.from("not json{ viewerCanMergeAsAdmin");
+    expect(denyAdminMergeCapability(body)).toBe(body);
   });
 });
 
