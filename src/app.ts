@@ -1,7 +1,7 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { createAuthMiddleware, type CredentialPair } from "./auth.js";
-import { checkRestBlock, checkGraphQLBlock } from "./blocklist.js";
+import { checkRestBlock, checkGraphQLBlock, sendBlockedResponse } from "./blocklist.js";
 import { createRestMergeGate, createGraphQLMergeGate } from "./merge-gate.js";
 import { forwardToGitHub } from "./proxy.js";
 import { transformCreatePullRequest } from "./transform.js";
@@ -91,12 +91,7 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   app.use((req: Request, res: Response, next: NextFunction) => {
     const result = checkRestBlock(req.method, req.path);
     if (result.blocked) {
-      res.status(403).json({
-        message: "Operation blocked by proxy policy",
-        reason: result.reason,
-        method: req.method,
-        path: req.path,
-      });
+      sendBlockedResponse(res, result.reason, { method: req.method, path: req.path });
       return;
     }
     next();
@@ -112,10 +107,7 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   app.post("/graphql", (req: Request, res: Response, next: NextFunction) => {
     const result = checkGraphQLBlock(req.body);
     if (result.blocked) {
-      res.status(403).json({
-        message: "Operation blocked by proxy policy",
-        reason: result.reason,
-      });
+      sendBlockedResponse(res, result.reason);
       return;
     }
     next();

@@ -21,7 +21,7 @@ export type JsonVisitor = (value: unknown, key: string | undefined) => [unknown,
 // (by value and/or its parent key) and otherwise recursing structurally into
 // arrays and objects. Bounded by MAX_JSON_WALK_DEPTH to guard against
 // pathological/cyclic nesting.
-export function walkJson(value: unknown, visit: JsonVisitor, depth = 0, key: string | undefined = undefined): [unknown, boolean] {
+export function walkJson(value: unknown, visit: JsonVisitor, depth = 0, key?: string): [unknown, boolean] {
   const handled = visit(value, key);
   if (handled !== undefined) return handled;
 

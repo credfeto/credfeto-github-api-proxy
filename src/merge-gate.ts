@@ -20,8 +20,8 @@
 import https from "https";
 import type http from "http";
 import type { Request, Response, NextFunction } from "express";
-import { extractGraphQLMutationNames } from "./blocklist.js";
-import { redactAuthorization } from "./http-headers.js";
+import { extractGraphQLMutationNames, sendBlockedResponse } from "./blocklist.js";
+import { PROXY_USER_AGENT, redactAuthorization } from "./http-headers.js";
 import { parseJsonBody } from "./json.js";
 import { GITHUB_API_HOST } from "./rewrite-urls.js";
 
@@ -91,7 +91,12 @@ function fetchMergeStateStatus(
       authorization,
       "content-type": "application/json",
       "content-length": Buffer.byteLength(requestBody),
-      "user-agent": "github-api-proxy/1.0",
+      "user-agent": PROXY_USER_AGENT,
+    };
+
+    const failClosed = (message: string, extra?: Record<string, unknown>): void => {
+      console.error(message, JSON.stringify({ ...extra, headers: redactAuthorization(headers) }));
+      resolve(null);
     };
 
     const req = https.request(
@@ -108,11 +113,7 @@ function fetchMergeStateStatus(
         res.on("end", () => {
           const statusCode = res.statusCode ?? 0;
           if (statusCode < 200 || statusCode >= 300) {
-            console.error(
-              "Merge gate: lookup returned non-2xx status",
-              JSON.stringify({ statusCode, headers: redactAuthorization(headers) }),
-            );
-            resolve(null);
+            failClosed("Merge gate: lookup returned non-2xx status", { statusCode });
             return;
           }
           resolve(parseMergeStateStatus(Buffer.concat(chunks)));
@@ -122,15 +123,10 @@ function fetchMergeStateStatus(
 
     req.on("timeout", () => {
       req.destroy();
-      console.error("Merge gate: lookup timed out", JSON.stringify({ headers: redactAuthorization(headers) }));
-      resolve(null);
+      failClosed("Merge gate: lookup timed out");
     });
     req.on("error", (err: Error) => {
-      console.error(
-        "Merge gate: lookup failed",
-        JSON.stringify({ error: err.message, headers: redactAuthorization(headers) }),
-      );
-      resolve(null);
+      failClosed("Merge gate: lookup failed", { error: err.message });
     });
 
     req.write(requestBody);
@@ -138,26 +134,13 @@ function fetchMergeStateStatus(
   });
 }
 
-function denyMerge(res: Response, reason: string, extra?: { method: string; path: string }): void {
-  res.status(403).json({
-    message: "Operation blocked by proxy policy",
-    reason,
-    ...(extra ?? {}),
-  });
-}
-
 function mergeStateDenialReason(mergeStateStatus: string | null): string {
   return `PR merge is not cleanly mergeable (mergeStateStatus: ${mergeStateStatus ?? "unknown"}); admin-bypass merges are blocked`;
 }
 
-function applyMergeStateResult(
-  res: Response,
-  next: NextFunction,
-  mergeStateStatus: string | null,
-  extra?: { method: string; path: string },
-): void {
+function applyMergeStateResult(res: Response, next: NextFunction, mergeStateStatus: string | null): void {
   if (!isMergeStateAllowed(mergeStateStatus)) {
-    denyMerge(res, mergeStateDenialReason(mergeStateStatus), extra);
+    sendBlockedResponse(res, mergeStateDenialReason(mergeStateStatus));
     return;
   }
   next();
@@ -177,7 +160,7 @@ export function createRestMergeGate(): (req: Request, res: Response, next: NextF
       MERGE_STATE_BY_NUMBER_QUERY,
       { owner: target.owner, repo: target.repo, number: target.number },
       authorization,
-    ).then((mergeStateStatus) => applyMergeStateResult(res, next, mergeStateStatus, { method: req.method, path: req.path }));
+    ).then((mergeStateStatus) => applyMergeStateResult(res, next, mergeStateStatus));
   };
 }
 
@@ -191,7 +174,7 @@ export function createGraphQLMergeGate(): (req: Request, res: Response, next: Ne
 
     const pullRequestId = extractGraphQLMergePullRequestId(req.body);
     if (pullRequestId === null) {
-      denyMerge(res, "Could not determine target pull request for mergePullRequest mutation; failing closed");
+      sendBlockedResponse(res, "Could not determine target pull request for mergePullRequest mutation; failing closed");
       return;
     }
 

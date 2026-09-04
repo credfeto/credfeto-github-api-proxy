@@ -9,7 +9,7 @@ import {
   serializeBody,
   buildCacheKey,
 } from "./cache.js";
-import { redactAuthorization } from "./http-headers.js";
+import { PROXY_USER_AGENT, redactAuthorization } from "./http-headers.js";
 import { injectInstalledVersion } from "./meta.js";
 import { GITHUB_API_HOST, rewriteJsonResponseBody, rewriteResponseHeaders } from "./rewrite-urls.js";
 
@@ -139,7 +139,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   const headers: http.OutgoingHttpHeaders = {
     ...req.headers,
     host: targetHost,
-    "user-agent": req.headers["user-agent"] ?? "github-api-proxy/1.0",
+    "user-agent": req.headers["user-agent"] ?? PROXY_USER_AGENT,
     "if-none-match": undefined,
     "x-forwarded-for": undefined,
     "x-forwarded-host": undefined,
