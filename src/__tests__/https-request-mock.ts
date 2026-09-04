@@ -53,3 +53,18 @@ export function mockUpstream(setup: UpstreamSetup = {}): { getOptions: () => htt
 
   return { getOptions: () => captured };
 }
+
+/** Installs a one-shot spy on https.request whose request emits a network-level "error" instead of a response. */
+export function mockUpstreamError(error: Error): void {
+  vi.spyOn(https, "request").mockImplementationOnce((() => {
+    const fakeReq = Object.assign(new EventEmitter(), {
+      setHeader: vi.fn(),
+      write: vi.fn(),
+      end: vi.fn(),
+    }) as unknown as ClientRequest;
+
+    process.nextTick(() => fakeReq.emit("error", error));
+
+    return fakeReq;
+  }) as unknown as typeof https.request);
+}

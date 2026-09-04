@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import request from "supertest";
 import { createApp } from "../app.js";
 import { forwardToGitHub } from "../proxy.js";
-import { mockUpstream } from "./https-request-mock.js";
+import { mockUpstream, mockUpstreamError } from "./https-request-mock.js";
 
 // Prevent any real network calls — tests must not hit api.github.com
 vi.mock("../proxy.js", () => ({
@@ -555,13 +555,7 @@ describe("Merge gate — REST PUT /pulls/:pull_number/merge", () => {
   });
 
   it("blocks the merge (fails closed) when the lookup errors over the network", async () => {
-    const https = await import("https");
-    const { EventEmitter } = await import("events");
-    const spy = vi.spyOn(https.default, "request").mockImplementationOnce(((_options: unknown) => {
-      const fakeReq = Object.assign(new EventEmitter(), { setHeader: vi.fn(), write: vi.fn(), end: vi.fn() });
-      process.nextTick(() => fakeReq.emit("error", new Error("connection reset")));
-      return fakeReq;
-    }) as unknown as typeof https.default.request);
+    mockUpstreamError(new Error("connection reset"));
 
     const res = await request(app)
       .put("/repos/alice/myrepo/pulls/7/merge")
@@ -570,7 +564,6 @@ describe("Merge gate — REST PUT /pulls/:pull_number/merge", () => {
 
     expect(res.status).toBe(403);
     expect(mockForward).not.toHaveBeenCalled();
-    spy.mockRestore();
   });
 
   it("does not gate unrelated PUT requests (e.g. updating the PR itself)", async () => {
