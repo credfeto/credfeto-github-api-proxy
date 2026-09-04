@@ -20,19 +20,10 @@
 import https from "https";
 import type http from "http";
 import type { Request, Response, NextFunction } from "express";
+import { redactAuthorization } from "./http-headers.js";
 import { GITHUB_API_HOST } from "./rewrite-urls.js";
 
-const REDACTED = "[REDACTED]";
 const LOOKUP_TIMEOUT_MS = 10_000;
-
-// Copied rather than imported from proxy.ts: app.test.ts mocks proxy.js with a
-// factory that exports only forwardToGitHub, so any other import from it
-// resolves undefined in every app test.
-function redactAuthorization(headers: http.OutgoingHttpHeaders): http.OutgoingHttpHeaders {
-  const redacted: http.OutgoingHttpHeaders = { ...headers };
-  if (redacted.authorization !== undefined) redacted.authorization = REDACTED;
-  return redacted;
-}
 
 /** Merge states a non-admin caller could merge through unassisted (matches gh's isImmediatelyMergeable). */
 const ALLOWED_MERGE_STATES: ReadonlySet<string> = new Set(["CLEAN", "HAS_HOOKS", "UNSTABLE"]);
@@ -182,6 +173,19 @@ function mergeStateDenialReason(mergeStateStatus: string | null): string {
   return `PR merge is not cleanly mergeable (mergeStateStatus: ${mergeStateStatus ?? "unknown"}); admin-bypass merges are blocked`;
 }
 
+function applyMergeStateResult(
+  res: Response,
+  next: NextFunction,
+  mergeStateStatus: string | null,
+  extra?: { method: string; path: string },
+): void {
+  if (!isMergeStateAllowed(mergeStateStatus)) {
+    denyMerge(res, mergeStateDenialReason(mergeStateStatus), extra);
+    return;
+  }
+  next();
+}
+
 /** Express middleware gating REST `PUT .../pulls/:pull_number/merge` requests. */
 export function createRestMergeGate(): (req: Request, res: Response, next: NextFunction) => void {
   return function restMergeGate(req: Request, res: Response, next: NextFunction): void {
@@ -196,13 +200,7 @@ export function createRestMergeGate(): (req: Request, res: Response, next: NextF
       MERGE_STATE_BY_NUMBER_QUERY,
       { owner: target.owner, repo: target.repo, number: target.number },
       authorization,
-    ).then((mergeStateStatus) => {
-      if (!isMergeStateAllowed(mergeStateStatus)) {
-        denyMerge(res, mergeStateDenialReason(mergeStateStatus), { method: req.method, path: req.path });
-        return;
-      }
-      next();
-    });
+    ).then((mergeStateStatus) => applyMergeStateResult(res, next, mergeStateStatus, { method: req.method, path: req.path }));
   };
 }
 
@@ -221,14 +219,8 @@ export function createGraphQLMergeGate(): (req: Request, res: Response, next: Ne
     }
 
     const authorization = req.headers.authorization as string;
-    void fetchMergeStateStatus(MERGE_STATE_BY_ID_QUERY, { id: pullRequestId }, authorization).then(
-      (mergeStateStatus) => {
-        if (!isMergeStateAllowed(mergeStateStatus)) {
-          denyMerge(res, mergeStateDenialReason(mergeStateStatus));
-          return;
-        }
-        next();
-      },
+    void fetchMergeStateStatus(MERGE_STATE_BY_ID_QUERY, { id: pullRequestId }, authorization).then((mergeStateStatus) =>
+      applyMergeStateResult(res, next, mergeStateStatus),
     );
   };
 }

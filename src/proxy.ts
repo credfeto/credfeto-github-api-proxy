@@ -9,19 +9,13 @@ import {
   serializeBody,
   buildCacheKey,
 } from "./cache.js";
+import { redactAuthorization } from "./http-headers.js";
 import { injectInstalledVersion } from "./meta.js";
-import { GITHUB_API_HOST, denyAdminMergeCapability, rewriteJsonBody, rewriteResponseHeaders } from "./rewrite-urls.js";
+import { GITHUB_API_HOST, rewriteJsonResponseBody, rewriteResponseHeaders } from "./rewrite-urls.js";
 
 const GITHUB_UPLOADS_HOST = "uploads.github.com";
 
-const REDACTED = "[REDACTED]";
 const MAX_DIAGNOSTIC_BODY_BYTES = 64 * 1024;
-
-function redactAuthorization(headers: http.OutgoingHttpHeaders): http.OutgoingHttpHeaders {
-  const redacted: http.OutgoingHttpHeaders = { ...headers };
-  if (redacted.authorization !== undefined) redacted.authorization = REDACTED;
-  return redacted;
-}
 
 /**
  * Tees up to maxBytes of a response stream without buffering more even if the
@@ -270,8 +264,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         }
         const rawBody = Buffer.concat(chunks);
         const metaBody = isMetaRequest ? injectInstalledVersion(rawBody) : rawBody;
-        const adminGuardedBody = denyAdminMergeCapability(metaBody);
-        const body = rewriteJsonBody(adminGuardedBody, proxyOrigin);
+        const body = rewriteJsonResponseBody(metaBody, proxyOrigin);
         const statusCode = proxyRes.statusCode ?? 200;
         const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
         const responseHeaders: Record<string, string | string[] | undefined> = rewriteProxyHeaders(proxyRes.headers);
