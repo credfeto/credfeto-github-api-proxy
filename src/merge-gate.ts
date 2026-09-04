@@ -20,8 +20,15 @@
 import https from "https";
 import type http from "http";
 import type { Request, Response, NextFunction } from "express";
+import { extractGraphQLMutationNames } from "./blocklist.js";
 import { redactAuthorization } from "./http-headers.js";
+import { parseJsonBody } from "./json.js";
 import { GITHUB_API_HOST } from "./rewrite-urls.js";
+
+/** Narrows to a plain object record, or undefined for anything else (including null). */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+}
 
 const LOOKUP_TIMEOUT_MS = 10_000;
 
@@ -50,22 +57,13 @@ export function extractRestMergeTarget(method: string, path: string): RestMergeT
 
 /** Identifies a GraphQL `mergePullRequest` mutation body. */
 export function isGraphQLMergePullRequestMutation(body: unknown): boolean {
-  if (!body || typeof body !== "object") return false;
-  const { query } = body as Record<string, unknown>;
-  if (typeof query !== "string") return false;
-  const trimmed = query.trimStart();
-  if (!trimmed.startsWith("mutation")) return false;
-  return query.includes("mergePullRequest");
+  return extractGraphQLMutationNames(body, ["mergePullRequest"]).includes("mergePullRequest");
 }
 
 /** Extracts `variables.input.pullRequestId` from a GraphQL request body. */
 export function extractGraphQLMergePullRequestId(body: unknown): string | null {
-  if (!body || typeof body !== "object") return null;
-  const { variables } = body as Record<string, unknown>;
-  if (!variables || typeof variables !== "object") return null;
-  const input = (variables as Record<string, unknown>).input;
-  if (!input || typeof input !== "object") return null;
-  const pullRequestId = (input as Record<string, unknown>).pullRequestId;
+  const input = asRecord(asRecord(asRecord(body)?.variables)?.input);
+  const pullRequestId = input?.pullRequestId;
   return typeof pullRequestId === "string" ? pullRequestId : null;
 }
 
@@ -74,32 +72,11 @@ const MERGE_STATE_BY_NUMBER_QUERY =
 const MERGE_STATE_BY_ID_QUERY = "query($id:ID!){node(id:$id){... on PullRequest{mergeStateStatus}}}";
 
 function parseMergeStateStatus(body: Buffer): string | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body.toString("utf8"));
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object") return null;
-  const data = (parsed as Record<string, unknown>).data;
-  if (!data || typeof data !== "object") return null;
-
-  const repository = (data as Record<string, unknown>).repository;
-  if (repository && typeof repository === "object") {
-    const pullRequest = (repository as Record<string, unknown>).pullRequest;
-    if (pullRequest && typeof pullRequest === "object") {
-      const status = (pullRequest as Record<string, unknown>).mergeStateStatus;
-      if (typeof status === "string") return status;
-    }
-  }
-
-  const node = (data as Record<string, unknown>).node;
-  if (node && typeof node === "object") {
-    const status = (node as Record<string, unknown>).mergeStateStatus;
-    if (typeof status === "string") return status;
-  }
-
-  return null;
+  const data = asRecord(asRecord(parseJsonBody(body.toString("utf8")))?.data);
+  const pullRequest = asRecord(asRecord(data?.repository)?.pullRequest);
+  const node = asRecord(data?.node);
+  const status = pullRequest?.mergeStateStatus ?? node?.mergeStateStatus;
+  return typeof status === "string" ? status : null;
 }
 
 /** Looks up a PR's `mergeStateStatus` via GraphQL using the caller's real PAT. Resolves null (fail closed) on any failure. */

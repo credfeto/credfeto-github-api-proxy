@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  rewriteEmbeddedApiGithubUrls,
-  rewriteJsonBody,
-  rewriteResponseHeaders,
-  denyAdminMergeCapability,
-} from "../rewrite-urls.js";
+import { rewriteEmbeddedApiGithubUrls, rewriteJsonResponseBody, rewriteResponseHeaders } from "../rewrite-urls.js";
 
 const PROXY_ORIGIN = "https://proxy.example.com";
 
@@ -57,10 +52,10 @@ describe("rewriteEmbeddedApiGithubUrls", () => {
   });
 });
 
-describe("rewriteJsonBody", () => {
+describe("rewriteJsonResponseBody — URL rewriting", () => {
   it("rewrites a top-level field", () => {
     const body = Buffer.from(JSON.stringify({ url: "https://api.github.com/repos/alice/myrepo" }));
-    const result = rewriteJsonBody(body, PROXY_ORIGIN);
+    const result = rewriteJsonResponseBody(body, PROXY_ORIGIN);
     expect(JSON.parse(result.toString("utf8"))).toStrictEqual({ url: `${PROXY_ORIGIN}/repos/alice/myrepo` });
   });
 
@@ -68,7 +63,7 @@ describe("rewriteJsonBody", () => {
     const body = Buffer.from(
       JSON.stringify({ subject: { url: "https://api.github.com/notifications/threads/1" } }),
     );
-    const result = rewriteJsonBody(body, PROXY_ORIGIN);
+    const result = rewriteJsonResponseBody(body, PROXY_ORIGIN);
     expect(JSON.parse(result.toString("utf8"))).toStrictEqual({
       subject: { url: `${PROXY_ORIGIN}/notifications/threads/1` },
     });
@@ -78,7 +73,7 @@ describe("rewriteJsonBody", () => {
     const body = Buffer.from(
       JSON.stringify([{ url: "https://api.github.com/repos/alice/myrepo/issues/1" }]),
     );
-    const result = rewriteJsonBody(body, PROXY_ORIGIN);
+    const result = rewriteJsonResponseBody(body, PROXY_ORIGIN);
     expect(JSON.parse(result.toString("utf8"))).toStrictEqual([
       { url: `${PROXY_ORIGIN}/repos/alice/myrepo/issues/1` },
     ]);
@@ -91,7 +86,7 @@ describe("rewriteJsonBody", () => {
         html_url: "https://github.com/alice/myrepo/issues/1",
       }),
     );
-    const result = rewriteJsonBody(body, PROXY_ORIGIN);
+    const result = rewriteJsonResponseBody(body, PROXY_ORIGIN);
     expect(JSON.parse(result.toString("utf8"))).toStrictEqual({
       url: `${PROXY_ORIGIN}/repos/alice/myrepo/issues/1`,
       html_url: "https://github.com/alice/myrepo/issues/1",
@@ -100,24 +95,24 @@ describe("rewriteJsonBody", () => {
 
   it("returns the original buffer unchanged when malformed JSON is given", () => {
     const body = Buffer.from("not json{");
-    expect(rewriteJsonBody(body, PROXY_ORIGIN)).toBe(body);
+    expect(rewriteJsonResponseBody(body, PROXY_ORIGIN)).toBe(body);
   });
 
   it("returns the original buffer unchanged for a top-level JSON primitive", () => {
     const body = Buffer.from(JSON.stringify("just a string"));
-    expect(rewriteJsonBody(body, PROXY_ORIGIN)).toBe(body);
+    expect(rewriteJsonResponseBody(body, PROXY_ORIGIN)).toBe(body);
   });
 
   it("returns the original buffer unchanged when nothing needed rewriting", () => {
     const body = Buffer.from(JSON.stringify({ html_url: "https://github.com/alice/myrepo" }));
-    expect(rewriteJsonBody(body, PROXY_ORIGIN)).toBe(body);
+    expect(rewriteJsonResponseBody(body, PROXY_ORIGIN)).toBe(body);
   });
 });
 
-describe("denyAdminMergeCapability", () => {
+describe("rewriteJsonResponseBody — admin-merge masking", () => {
   it("forces a top-level viewerCanMergeAsAdmin:true to false", () => {
     const body = Buffer.from(JSON.stringify({ viewerCanMergeAsAdmin: true }));
-    const result = denyAdminMergeCapability(body);
+    const result = rewriteJsonResponseBody(body, PROXY_ORIGIN);
     expect(JSON.parse(result.toString("utf8"))).toStrictEqual({ viewerCanMergeAsAdmin: false });
   });
 
@@ -127,7 +122,7 @@ describe("denyAdminMergeCapability", () => {
         data: { repository: { pullRequest: { number: 7, viewerCanMergeAsAdmin: true } } },
       }),
     );
-    const result = denyAdminMergeCapability(body);
+    const result = rewriteJsonResponseBody(body, PROXY_ORIGIN);
     expect(JSON.parse(result.toString("utf8"))).toStrictEqual({
       data: { repository: { pullRequest: { number: 7, viewerCanMergeAsAdmin: false } } },
     });
@@ -137,7 +132,7 @@ describe("denyAdminMergeCapability", () => {
     const body = Buffer.from(
       JSON.stringify({ nodes: [{ viewerCanMergeAsAdmin: true }, { viewerCanMergeAsAdmin: false }] }),
     );
-    const result = denyAdminMergeCapability(body);
+    const result = rewriteJsonResponseBody(body, PROXY_ORIGIN);
     expect(JSON.parse(result.toString("utf8"))).toStrictEqual({
       nodes: [{ viewerCanMergeAsAdmin: false }, { viewerCanMergeAsAdmin: false }],
     });
@@ -145,24 +140,24 @@ describe("denyAdminMergeCapability", () => {
 
   it("leaves viewerCanMergeAsAdmin:false untouched (no unnecessary rewrite)", () => {
     const body = Buffer.from(JSON.stringify({ viewerCanMergeAsAdmin: false }));
-    expect(denyAdminMergeCapability(body)).toBe(body);
+    expect(rewriteJsonResponseBody(body, PROXY_ORIGIN)).toBe(body);
   });
 
   it("fires even when the body has no api.github.com URL in it", () => {
     const body = Buffer.from(JSON.stringify({ viewerCanMergeAsAdmin: true, number: 1 }));
     expect(body.includes("api.github.com")).toBe(false);
-    const result = denyAdminMergeCapability(body);
+    const result = rewriteJsonResponseBody(body, PROXY_ORIGIN);
     expect(JSON.parse(result.toString("utf8")).viewerCanMergeAsAdmin).toBe(false);
   });
 
   it("returns the original buffer unchanged when the field is absent", () => {
     const body = Buffer.from(JSON.stringify({ number: 1 }));
-    expect(denyAdminMergeCapability(body)).toBe(body);
+    expect(rewriteJsonResponseBody(body, PROXY_ORIGIN)).toBe(body);
   });
 
   it("returns the original buffer unchanged for malformed JSON", () => {
     const body = Buffer.from("not json{ viewerCanMergeAsAdmin");
-    expect(denyAdminMergeCapability(body)).toBe(body);
+    expect(rewriteJsonResponseBody(body, PROXY_ORIGIN)).toBe(body);
   });
 });
 
