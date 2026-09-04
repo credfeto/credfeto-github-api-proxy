@@ -6,7 +6,7 @@
 // html_url fields (github.com, the web UI) are untouched by construction: they
 // never contain the api.github.com host this module matches on.
 
-import { MAX_JSON_WALK_DEPTH, parseJsonBody } from "./json.js";
+import { type JsonVisitor, parseJsonBody, walkJson } from "./json.js";
 
 export const GITHUB_API_HOST = "api.github.com";
 
@@ -27,32 +27,12 @@ export function rewriteEmbeddedApiGithubUrls(text: string, proxyOrigin: string):
   return text.replace(API_GITHUB_URL_PATTERN, () => proxyOrigin);
 }
 
-function walkAndRewrite(value: unknown, proxyOrigin: string, depth = 0): [unknown, boolean] {
-  if (depth > MAX_JSON_WALK_DEPTH) return [value, false];
-  if (typeof value === "string") {
+function rewriteUrlVisitor(proxyOrigin: string): JsonVisitor {
+  return (value) => {
+    if (typeof value !== "string") return undefined;
     const rewritten = rewriteIfPresent(value, proxyOrigin);
     return [rewritten, rewritten !== value];
-  }
-  if (Array.isArray(value)) {
-    let changed = false;
-    const result = value.map((item) => {
-      const [rewrittenItem, itemChanged] = walkAndRewrite(item, proxyOrigin, depth + 1);
-      if (itemChanged) changed = true;
-      return rewrittenItem;
-    });
-    return [result, changed];
-  }
-  if (value !== null && typeof value === "object") {
-    let changed = false;
-    const result: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      const [rewrittenVal, valChanged] = walkAndRewrite(val, proxyOrigin, depth + 1);
-      if (valChanged) changed = true;
-      result[key] = rewrittenVal;
-    }
-    return [result, changed];
-  }
-  return [value, false];
+  };
 }
 
 // Parses `body` as JSON, recursively rewrites every embedded api.github.com
@@ -71,51 +51,25 @@ export function rewriteJsonBody(body: Buffer, proxyOrigin: string): Buffer {
     return body;
   }
 
-  const [rewritten, changed] = walkAndRewrite(parsed, proxyOrigin);
+  const [rewritten, changed] = walkJson(parsed, rewriteUrlVisitor(proxyOrigin));
   if (!changed) return body;
   return Buffer.from(JSON.stringify(rewritten), "utf8");
 }
 
 const VIEWER_CAN_MERGE_AS_ADMIN_FIELD = "viewerCanMergeAsAdmin";
 
-function walkAndDenyAdminMerge(value: unknown, depth = 0): [unknown, boolean] {
-  if (depth > MAX_JSON_WALK_DEPTH) return [value, false];
-  if (Array.isArray(value)) {
-    let changed = false;
-    const result = value.map((item) => {
-      const [rewrittenItem, itemChanged] = walkAndDenyAdminMerge(item, depth + 1);
-      if (itemChanged) changed = true;
-      return rewrittenItem;
-    });
-    return [result, changed];
+const denyAdminMergeVisitor: JsonVisitor = (value, key) => {
+  if (key === VIEWER_CAN_MERGE_AS_ADMIN_FIELD && value === true) {
+    return [false, true];
   }
-  if (value !== null && typeof value === "object") {
-    let changed = false;
-    const result: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      if (key === VIEWER_CAN_MERGE_AS_ADMIN_FIELD && val === true) {
-        result[key] = false;
-        changed = true;
-        continue;
-      }
-      const [rewrittenVal, valChanged] = walkAndDenyAdminMerge(val, depth + 1);
-      if (valChanged) changed = true;
-      result[key] = rewrittenVal;
-    }
-    return [result, changed];
-  }
-  return [value, false];
-}
+  return undefined;
+};
 
 // Forces every `viewerCanMergeAsAdmin: true` field in a GraphQL JSON response
 // to false. This is advisory signalling, not a control on its own — actual
 // admin-bypass merges are already rejected by the merge gate regardless of
 // this field's value — but a caller behind this proxy has no usable
 // admin-bypass path, so the API should not claim otherwise.
-//
-// This is its own pass rather than folded into rewriteJsonBody's walk: that
-// function short-circuits on `body.includes(GITHUB_API_HOST)`, and a GraphQL
-// response carrying this field usually has no such URL in it.
 export function denyAdminMergeCapability(body: Buffer): Buffer {
   if (!body.includes(VIEWER_CAN_MERGE_AS_ADMIN_FIELD)) {
     return body;
@@ -126,7 +80,29 @@ export function denyAdminMergeCapability(body: Buffer): Buffer {
     return body;
   }
 
-  const [rewritten, changed] = walkAndDenyAdminMerge(parsed);
+  const [rewritten, changed] = walkJson(parsed, denyAdminMergeVisitor);
+  if (!changed) return body;
+  return Buffer.from(JSON.stringify(rewritten), "utf8");
+}
+
+// Combines rewriteJsonBody and denyAdminMergeCapability into a single
+// parse/walk/stringify pass, since every proxied JSON response body needs
+// both transforms applied and a GraphQL PR response commonly carries both an
+// api.github.com URL and viewerCanMergeAsAdmin.
+export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string): Buffer {
+  if (!body.includes(GITHUB_API_HOST) && !body.includes(VIEWER_CAN_MERGE_AS_ADMIN_FIELD)) {
+    return body;
+  }
+
+  const parsed = parseJsonBody(body.toString("utf8"));
+  if (parsed === null || typeof parsed !== "object") {
+    return body;
+  }
+
+  const urlVisitor = rewriteUrlVisitor(proxyOrigin);
+  const visit: JsonVisitor = (value, key) => denyAdminMergeVisitor(value, key) ?? urlVisitor(value, key);
+
+  const [rewritten, changed] = walkJson(parsed, visit);
   if (!changed) return body;
   return Buffer.from(JSON.stringify(rewritten), "utf8");
 }
