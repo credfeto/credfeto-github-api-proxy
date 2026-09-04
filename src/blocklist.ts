@@ -11,9 +11,20 @@
  * PR operations, Actions reads, etc.
  */
 
+import type { Response } from "express";
+
 export interface BlockResult {
   blocked: boolean;
   reason?: string;
+}
+
+/** Sends the standard 403 "blocked by proxy policy" response, optionally with extra fields (e.g. method/path). */
+export function sendBlockedResponse(res: Response, reason: string | undefined, extra?: Record<string, unknown>): void {
+  res.status(403).json({
+    message: "Operation blocked by proxy policy",
+    reason,
+    ...(extra ?? {}),
+  });
 }
 
 /** REST paths that must be blocked, keyed by HTTP method(s). */
