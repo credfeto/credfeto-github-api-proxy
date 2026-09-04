@@ -264,7 +264,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         }
         const rawBody = Buffer.concat(chunks);
         const metaBody = isMetaRequest ? injectInstalledVersion(rawBody) : rawBody;
-        const body = rewriteJsonResponseBody(metaBody, proxyOrigin);
+        const body = rewriteJsonResponseBody(metaBody, proxyOrigin, req.path === "/graphql");
         const statusCode = proxyRes.statusCode ?? 200;
         const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
         const responseHeaders: Record<string, string | string[] | undefined> = rewriteProxyHeaders(proxyRes.headers);

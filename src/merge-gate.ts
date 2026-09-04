@@ -62,7 +62,8 @@ export function isGraphQLMergePullRequestMutation(body: unknown): boolean {
 
 /** Extracts `variables.input.pullRequestId` from a GraphQL request body. */
 export function extractGraphQLMergePullRequestId(body: unknown): string | null {
-  const input = asRecord(asRecord(asRecord(body)?.variables)?.input);
+  const variables = asRecord(asRecord(body)?.variables);
+  const input = asRecord(variables?.input);
   const pullRequestId = input?.pullRequestId;
   return typeof pullRequestId === "string" ? pullRequestId : null;
 }
@@ -72,8 +73,10 @@ const MERGE_STATE_BY_NUMBER_QUERY =
 const MERGE_STATE_BY_ID_QUERY = "query($id:ID!){node(id:$id){... on PullRequest{mergeStateStatus}}}";
 
 function parseMergeStateStatus(body: Buffer): string | null {
-  const data = asRecord(asRecord(parseJsonBody(body.toString("utf8")))?.data);
-  const pullRequest = asRecord(asRecord(data?.repository)?.pullRequest);
+  const parsed = asRecord(parseJsonBody(body.toString("utf8")));
+  const data = asRecord(parsed?.data);
+  const repository = asRecord(data?.repository);
+  const pullRequest = asRecord(repository?.pullRequest);
   const node = asRecord(data?.node);
   const status = pullRequest?.mergeStateStatus ?? node?.mergeStateStatus;
   return typeof status === "string" ? status : null;
@@ -146,6 +149,19 @@ function applyMergeStateResult(res: Response, next: NextFunction, mergeStateStat
   next();
 }
 
+/** Looks up mergeStateStatus and applies the resulting allow/deny decision to the response. */
+function gateOnMergeState(
+  query: string,
+  variables: Record<string, unknown>,
+  authorization: string,
+  res: Response,
+  next: NextFunction,
+): void {
+  void fetchMergeStateStatus(query, variables, authorization).then((mergeStateStatus) =>
+    applyMergeStateResult(res, next, mergeStateStatus),
+  );
+}
+
 /** Express middleware gating REST `PUT .../pulls/:pull_number/merge` requests. */
 export function createRestMergeGate(): (req: Request, res: Response, next: NextFunction) => void {
   return function restMergeGate(req: Request, res: Response, next: NextFunction): void {
@@ -156,11 +172,13 @@ export function createRestMergeGate(): (req: Request, res: Response, next: NextF
     }
 
     const authorization = req.headers.authorization as string;
-    void fetchMergeStateStatus(
+    gateOnMergeState(
       MERGE_STATE_BY_NUMBER_QUERY,
       { owner: target.owner, repo: target.repo, number: target.number },
       authorization,
-    ).then((mergeStateStatus) => applyMergeStateResult(res, next, mergeStateStatus));
+      res,
+      next,
+    );
   };
 }
 
@@ -179,8 +197,6 @@ export function createGraphQLMergeGate(): (req: Request, res: Response, next: Ne
     }
 
     const authorization = req.headers.authorization as string;
-    void fetchMergeStateStatus(MERGE_STATE_BY_ID_QUERY, { id: pullRequestId }, authorization).then((mergeStateStatus) =>
-      applyMergeStateResult(res, next, mergeStateStatus),
-    );
+    gateOnMergeState(MERGE_STATE_BY_ID_QUERY, { id: pullRequestId }, authorization, res, next);
   };
 }
