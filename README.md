@@ -41,12 +41,18 @@ All of the following return **HTTP 403** with a JSON body explaining why:
 | `DELETE` | `/repos/:owner/:repo/contents/**` | Deletes a file (generates a commit) |
 | `POST` | `**/git-receive-pack` | HTTPS git push (server-side receive) |
 | `GET` | `**/info/refs?service=git-receive-pack` | HTTPS git push advertisement phase |
+| `POST` | `/repos/:owner/:repo/merges` | Merges a branch directly, with no pull request or review involved |
+| `POST` | `/repos/:owner/:repo/merge-upstream` | Syncs a fork with its upstream, with no pull request or review involved |
 
 **Read operations on the same paths are allowed** (e.g. `GET /repos/:owner/:repo/git/commits/:sha`).
 
+`PUT /repos/:owner/:repo/pulls/:pull_number/merge` (merging an actual pull
+request) is not hard-blocked here — see R3a, the merge gate, below.
+
 ### R3 — Blocked GraphQL mutations
 
-GraphQL mutations that create, move, or delete git objects are blocked:
+GraphQL mutations that create, move, or delete git objects, or merge a branch
+with no pull request/review involved, are blocked:
 
 | Mutation | Why blocked |
 | --- | --- |
@@ -54,9 +60,43 @@ GraphQL mutations that create, move, or delete git objects are blocked:
 | `createRef` | Creates a branch or tag |
 | `updateRef` | Advances a branch |
 | `deleteRef` | Deletes a branch or tag |
+| `mergeBranch` | Merges a branch directly, with no pull request or review involved |
 
 All **queries** are allowed. **Non-git mutations** (e.g. `createIssue`,
-`addComment`, `createPullRequest`, `mergePullRequest`) are allowed.
+`addComment`, `createPullRequest`) are allowed. `mergePullRequest` is not
+hard-blocked — see R3a below.
+
+### R3a — Merge gate (admin-bypass protection)
+
+GitHub honours a merge request from a repo admin/owner PAT even when
+required reviews or status checks are unmet, unless the target repo has
+branch protection's "Do not allow bypassing the above settings"
+(`enforce_admins`) turned on. This proxy has no visibility into which target
+repos have that setting, so it applies its own independent gate to every PR
+merge attempt — REST `PUT /repos/:owner/:repo/pulls/:pull_number/merge` and
+GraphQL `mergePullRequest` — rather than trusting GitHub to apply the same
+gate it would apply to a non-admin caller:
+
+1. The proxy looks up the PR's `mergeStateStatus` from GitHub using its own
+   real PAT.
+2. The merge is forwarded only when `mergeStateStatus` is `CLEAN`,
+   `HAS_HOOKS`, or `UNSTABLE` — exactly the states a non-admin caller could
+   merge through unassisted (mirroring `gh`'s own `isImmediatelyMergeable`
+   check).
+3. Every other state (`BLOCKED`, `BEHIND`, `DIRTY`, `DRAFT`, `UNKNOWN`), and
+   any lookup failure or timeout, returns **HTTP 403** — the proxy fails
+   closed rather than risking a bypass.
+
+`enablePullRequestAutoMerge` / `disablePullRequestAutoMerge` are **not**
+gated: they schedule a merge for later rather than merging immediately, so a
+PR that isn't yet mergeable can still queue itself to land once it goes
+green.
+
+As advisory signalling (not a control on its own, since the gate above
+already blocks the underlying action), any `viewerCanMergeAsAdmin: true`
+field in a GraphQL response is rewritten to `false` before being returned to
+the caller — a caller behind this proxy has no usable admin-bypass path, so
+the API should not claim otherwise.
 
 ### R4 — Allowed operations (non-exhaustive)
 

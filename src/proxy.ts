@@ -10,7 +10,7 @@ import {
   buildCacheKey,
 } from "./cache.js";
 import { injectInstalledVersion } from "./meta.js";
-import { GITHUB_API_HOST, rewriteJsonBody, rewriteResponseHeaders } from "./rewrite-urls.js";
+import { GITHUB_API_HOST, denyAdminMergeCapability, rewriteJsonBody, rewriteResponseHeaders } from "./rewrite-urls.js";
 
 const GITHUB_UPLOADS_HOST = "uploads.github.com";
 
@@ -270,7 +270,8 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         }
         const rawBody = Buffer.concat(chunks);
         const metaBody = isMetaRequest ? injectInstalledVersion(rawBody) : rawBody;
-        const body = rewriteJsonBody(metaBody, proxyOrigin);
+        const adminGuardedBody = denyAdminMergeCapability(metaBody);
+        const body = rewriteJsonBody(adminGuardedBody, proxyOrigin);
         const statusCode = proxyRes.statusCode ?? 200;
         const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
         const responseHeaders: Record<string, string | string[] | undefined> = rewriteProxyHeaders(proxyRes.headers);

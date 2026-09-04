@@ -61,18 +61,36 @@ const BLOCKED_REST: Array<{ methods: string[]; pattern: RegExp; reason: string }
     pattern: /\/info\/refs.*service=git-receive-pack/i,
     reason: "info/refs?service=git-receive-pack is the advertisement phase of git push",
   },
+  // --- No-PR merge endpoints ---
+  // These merge branches directly with no pull request involved, so there is
+  // no review/status-check gate for the merge-gate module to verify against.
+  {
+    methods: ["POST"],
+    pattern: /^\/repos\/[^/]+\/[^/]+\/merges(?:\/|\?|$)/i,
+    reason: "POST /merges merges a branch directly without going through a pull request",
+  },
+  {
+    methods: ["POST"],
+    pattern: /^\/repos\/[^/]+\/[^/]+\/merge-upstream(?:\/|\?|$)/i,
+    reason: "merge-upstream syncs a fork with its upstream without a pull request or review",
+  },
 ];
 
 /**
- * GraphQL mutation names that create, move, or delete git refs/commits.
- * Queries are always allowed.  Non-git mutations (createIssue, addComment,
- * etc.) are also allowed.
+ * GraphQL mutation names that create, move, or delete git refs/commits, or
+ * merge branches with no pull request/review involved. Queries are always
+ * allowed. Non-git mutations (createIssue, addComment, etc.) are also
+ * allowed. Keyed by mutation name so each gets its own reason text.
  */
-const BLOCKED_GRAPHQL_MUTATIONS = new Set([
-  "createCommitOnBranch",
-  "createRef",
-  "updateRef",
-  "deleteRef",
+const BLOCKED_GRAPHQL_MUTATIONS: ReadonlyMap<string, string> = new Map([
+  ["createCommitOnBranch", "GraphQL mutation 'createCommitOnBranch' creates or manipulates git objects"],
+  ["createRef", "GraphQL mutation 'createRef' creates or manipulates git objects"],
+  ["updateRef", "GraphQL mutation 'updateRef' creates or manipulates git objects"],
+  ["deleteRef", "GraphQL mutation 'deleteRef' creates or manipulates git objects"],
+  [
+    "mergeBranch",
+    "GraphQL mutation 'mergeBranch' merges a branch directly without going through a pull request",
+  ],
 ]);
 
 /** Check whether a REST request should be blocked. */
@@ -115,7 +133,7 @@ export function extractGraphQLMutations(body: unknown): string[] {
   // Also extract the field names called inside mutation bodies
   // e.g. `{ createCommitOnBranch(...) { ... } }`
   // Simple heuristic: find known blocked names in the mutation string
-  for (const blocked of BLOCKED_GRAPHQL_MUTATIONS) {
+  for (const blocked of BLOCKED_GRAPHQL_MUTATIONS.keys()) {
     if (query.includes(blocked)) {
       names.push(blocked);
     }
@@ -128,11 +146,9 @@ export function extractGraphQLMutations(body: unknown): string[] {
 export function checkGraphQLBlock(body: unknown): BlockResult {
   const names = extractGraphQLMutations(body);
   for (const name of names) {
-    if (BLOCKED_GRAPHQL_MUTATIONS.has(name)) {
-      return {
-        blocked: true,
-        reason: `GraphQL mutation '${name}' creates or manipulates git objects`,
-      };
+    const reason = BLOCKED_GRAPHQL_MUTATIONS.get(name);
+    if (reason !== undefined) {
+      return { blocked: true, reason };
     }
   }
   return { blocked: false };

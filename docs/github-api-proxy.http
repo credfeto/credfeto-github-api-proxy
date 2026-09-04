@@ -229,6 +229,99 @@ Content-Type: application/json
   }
 }
 
+###
+
+### BLOCKED: merge a branch directly via REST (no pull request involved)
+# Expected: 403 {"message":"Operation blocked by proxy policy",...}
+POST {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/merges
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "base": "main",
+  "head": "feature/some-branch"
+}
+
+###
+
+### BLOCKED: sync a fork with its upstream (no pull request involved)
+# Expected: 403 {"message":"Operation blocked by proxy policy",...}
+POST {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/merge-upstream
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "branch": "main"
+}
+
+###
+
+### BLOCKED: GraphQL mutation mergeBranch (no pull request involved)
+# Expected: 403 {"message":"Operation blocked by proxy policy",...}
+POST {{proxyHost}}/graphql
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "query": "mutation MergeBranch($input: MergeBranchInput!) { mergeBranch(input: $input) { mergeCommit { oid } } }",
+  "variables": {
+    "input": {
+      "repositoryId": "R_kgDOABCDEF",
+      "base": "main",
+      "head": "feature/some-branch"
+    }
+  }
+}
+
+###############################################################################
+# Merge gate — R3a: PR merges are gated on mergeStateStatus
+###############################################################################
+
+### PR merge via REST — proxy independently verifies mergeStateStatus first
+# Expected: 200/403 depending on the PR's mergeStateStatus (see README R3a);
+# rejects even an admin-capable PAT if required reviews/checks are unmet.
+PUT {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/pulls/1/merge
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "merge_method": "merge"
+}
+
+###
+
+### PR merge via GraphQL mergePullRequest — same gate as the REST endpoint above
+# Expected: 200/403 depending on the PR's mergeStateStatus (see README R3a)
+POST {{proxyHost}}/graphql
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "query": "mutation Merge($input: MergePullRequestInput!) { mergePullRequest(input: $input) { pullRequest { merged } } }",
+  "variables": {
+    "input": {
+      "pullRequestId": "PR_kwABCDEF"
+    }
+  }
+}
+
+###
+
+### enablePullRequestAutoMerge — not gated (schedules a merge for later)
+# Expected: 200 (forwarded to GitHub unconditionally by the merge gate)
+POST {{proxyHost}}/graphql
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "query": "mutation EnableAutoMerge($input: EnablePullRequestAutoMergeInput!) { enablePullRequestAutoMerge(input: $input) { pullRequest { autoMergeRequest { enabledAt } } } }",
+  "variables": {
+    "input": {
+      "pullRequestId": "PR_kwABCDEF"
+    }
+  }
+}
+
 ###############################################################################
 # Authentication failures
 ###############################################################################

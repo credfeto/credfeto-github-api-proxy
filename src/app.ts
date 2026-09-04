@@ -2,6 +2,7 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { createAuthMiddleware, type CredentialPair } from "./auth.js";
 import { checkRestBlock, checkGraphQLBlock } from "./blocklist.js";
+import { createRestMergeGate, createGraphQLMergeGate } from "./merge-gate.js";
 import { forwardToGitHub } from "./proxy.js";
 import { transformCreatePullRequest } from "./transform.js";
 import { ResponseCache } from "./cache.js";
@@ -101,6 +102,12 @@ export function createApp(credentials: CredentialPair[]): express.Application {
     next();
   });
 
+  // ── REST merge gate ──────────────────────────────────────────────────────
+  // Independently verifies a PR is cleanly mergeable before forwarding a merge
+  // request, so a caller whose underlying PAT has admin-bypass rights cannot
+  // use this proxy to land a PR that fails required reviews/status checks.
+  app.use(createRestMergeGate());
+
   // ── GraphQL mutation blocklist ─────────────────────────────────────────────
   app.post("/graphql", (req: Request, res: Response, next: NextFunction) => {
     const result = checkGraphQLBlock(req.body);
@@ -113,6 +120,9 @@ export function createApp(credentials: CredentialPair[]): express.Application {
     }
     next();
   });
+
+  // ── GraphQL merge gate ───────────────────────────────────────────────────
+  app.post("/graphql", createGraphQLMergeGate());
 
   // ── GraphQL mutation transforms ────────────────────────────────────────────
   // Applied after the blocklist so blocked mutations never reach this stage.
