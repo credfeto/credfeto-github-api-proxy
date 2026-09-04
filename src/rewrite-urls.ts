@@ -35,27 +35,6 @@ function rewriteUrlVisitor(proxyOrigin: string): JsonVisitor {
   };
 }
 
-// Parses `body` as JSON, recursively rewrites every embedded api.github.com
-// URL in its string values, and re-serialises. Malformed JSON is returned
-// unchanged, and the original Buffer is returned as-is when nothing needed
-// rewriting.
-export function rewriteJsonBody(body: Buffer, proxyOrigin: string): Buffer {
-  // Cheap pre-check: skip the parse/walk/stringify pass entirely for the
-  // common case of a response with no api.github.com occurrence at all.
-  if (!body.includes(GITHUB_API_HOST)) {
-    return body;
-  }
-
-  const parsed = parseJsonBody(body.toString("utf8"));
-  if (parsed === null || typeof parsed !== "object") {
-    return body;
-  }
-
-  const [rewritten, changed] = walkJson(parsed, rewriteUrlVisitor(proxyOrigin));
-  if (!changed) return body;
-  return Buffer.from(JSON.stringify(rewritten), "utf8");
-}
-
 const VIEWER_CAN_MERGE_AS_ADMIN_FIELD = "viewerCanMergeAsAdmin";
 
 const denyAdminMergeVisitor: JsonVisitor = (value, key) => {
@@ -65,27 +44,7 @@ const denyAdminMergeVisitor: JsonVisitor = (value, key) => {
   return undefined;
 };
 
-// Forces every `viewerCanMergeAsAdmin: true` field in a GraphQL JSON response
-// to false. This is advisory signalling, not a control on its own — actual
-// admin-bypass merges are already rejected by the merge gate regardless of
-// this field's value — but a caller behind this proxy has no usable
-// admin-bypass path, so the API should not claim otherwise.
-export function denyAdminMergeCapability(body: Buffer): Buffer {
-  if (!body.includes(VIEWER_CAN_MERGE_AS_ADMIN_FIELD)) {
-    return body;
-  }
-
-  const parsed = parseJsonBody(body.toString("utf8"));
-  if (parsed === null || typeof parsed !== "object") {
-    return body;
-  }
-
-  const [rewritten, changed] = walkJson(parsed, denyAdminMergeVisitor);
-  if (!changed) return body;
-  return Buffer.from(JSON.stringify(rewritten), "utf8");
-}
-
-// Combines rewriteJsonBody and denyAdminMergeCapability into a single
+// Combines the URL-rewrite and admin-merge-deny visitors into a single
 // parse/walk/stringify pass, since every proxied JSON response body needs
 // both transforms applied and a GraphQL PR response commonly carries both an
 // api.github.com URL and viewerCanMergeAsAdmin.
@@ -107,8 +66,9 @@ export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string): Buff
   return Buffer.from(JSON.stringify(rewritten), "utf8");
 }
 
-// Cheap pre-check mirroring rewriteJsonBody's: most header values (date, etag,
-// x-ratelimit-*, ...) never contain the host, so skip the regex pass for them.
+// Cheap pre-check mirroring rewriteJsonResponseBody's: most header values
+// (date, etag, x-ratelimit-*, ...) never contain the host, so skip the regex
+// pass for them.
 function rewriteIfPresent(value: string, proxyOrigin: string): string {
   return value.includes(GITHUB_API_HOST) ? rewriteEmbeddedApiGithubUrls(value, proxyOrigin) : value;
 }

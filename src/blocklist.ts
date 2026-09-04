@@ -106,13 +106,15 @@ export function checkRestBlock(method: string, path: string): BlockResult {
 }
 
 /**
- * Extract the top-level operation names from a GraphQL request body.
- * Returns an empty array for queries (they start with "query" or "{") and
- * for any body that cannot be parsed.
+ * Extract the top-level operation names from a GraphQL request body: named
+ * mutations (`mutation Foo(` or `mutation Foo {`) plus any of
+ * `candidateNames` found as a field call anywhere in the document. Returns
+ * an empty array for queries (they start with "query" or "{") and for any
+ * body that cannot be parsed.
  *
  * We only inspect the operation type — never execute user-supplied code.
  */
-export function extractGraphQLMutations(body: unknown): string[] {
+export function extractGraphQLMutationNames(body: unknown, candidateNames: Iterable<string>): string[] {
   if (!body || typeof body !== "object") return [];
   const { query } = body as Record<string, unknown>;
   if (typeof query !== "string") return [];
@@ -132,14 +134,19 @@ export function extractGraphQLMutations(body: unknown): string[] {
 
   // Also extract the field names called inside mutation bodies
   // e.g. `{ createCommitOnBranch(...) { ... } }`
-  // Simple heuristic: find known blocked names in the mutation string
-  for (const blocked of BLOCKED_GRAPHQL_MUTATIONS.keys()) {
-    if (query.includes(blocked)) {
-      names.push(blocked);
+  // Simple heuristic: find each candidate name in the mutation string
+  for (const candidate of candidateNames) {
+    if (query.includes(candidate)) {
+      names.push(candidate);
     }
   }
 
   return [...new Set(names)];
+}
+
+/** Extract the top-level mutation names known to the blocklist from a GraphQL request body. */
+export function extractGraphQLMutations(body: unknown): string[] {
+  return extractGraphQLMutationNames(body, BLOCKED_GRAPHQL_MUTATIONS.keys());
 }
 
 /** Check whether a GraphQL request body contains a blocked mutation. */
