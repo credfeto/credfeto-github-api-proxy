@@ -29,6 +29,14 @@ export function rewriteEmbeddedApiGithubUrls(text: string, proxyOrigin: string):
 
 const VIEWER_CAN_MERGE_AS_ADMIN_FIELD = "viewerCanMergeAsAdmin";
 
+// Strips GraphQL `#`-comments (valid anywhere in a document, and equivalent to
+// whitespace per spec) so one inserted between an alias and the field name —
+// e.g. "x: #hide\nviewerCanMergeAsAdmin" — cannot hide the alias from the
+// pattern below.
+function stripGraphQLComments(query: string): string {
+  return query.replace(/#[^\n]*/g, "");
+}
+
 // A GraphQL response key is `viewerCanMergeAsAdmin` itself, or whatever alias
 // the query gave it (`x: viewerCanMergeAsAdmin`) — aliasing renames the key
 // in the response entirely, so masking by the literal field name alone would
@@ -37,7 +45,7 @@ function findViewerCanMergeAsAdminAliases(query: string): Set<string> {
   const aliases = new Set<string>([VIEWER_CAN_MERGE_AS_ADMIN_FIELD]);
   const aliasPattern = /(\w+)\s*:\s*viewerCanMergeAsAdmin\b/g;
   let m: RegExpExecArray | null;
-  while ((m = aliasPattern.exec(query)) !== null) {
+  while ((m = aliasPattern.exec(stripGraphQLComments(query))) !== null) {
     aliases.add(m[1]);
   }
   return aliases;
