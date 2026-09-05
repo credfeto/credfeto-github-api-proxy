@@ -175,6 +175,16 @@ describe("rewriteJsonResponseBody — admin-merge masking", () => {
     const body = Buffer.from(JSON.stringify({ x: true }));
     expect(rewriteJsonResponseBody(body, PROXY_ORIGIN, undefined)).toBe(body);
   });
+
+  it("masks an aliased field even when a GraphQL comment splits the alias from the field name (comment-interrupted alias bypass)", () => {
+    const query =
+      'query { repository(owner:"a",name:"b"){ pullRequest(number:1){ x: #hide\n viewerCanMergeAsAdmin } } }';
+    const body = Buffer.from(JSON.stringify({ data: { repository: { pullRequest: { x: true } } } }));
+    const result = rewriteJsonResponseBody(body, PROXY_ORIGIN, query);
+    expect(JSON.parse(result.toString("utf8"))).toStrictEqual({
+      data: { repository: { pullRequest: { x: false } } },
+    });
+  });
 });
 
 describe("rewriteResponseHeaders", () => {
