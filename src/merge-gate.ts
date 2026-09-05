@@ -65,7 +65,86 @@ export function isGraphQLMergePullRequestMutation(body: unknown): boolean {
   return extractGraphQLMutationNames(body, ["mergePullRequest"]).includes("mergePullRequest");
 }
 
-const MERGE_PULL_REQUEST_CALL = /mergePullRequest\s*\(\s*input\s*:\s*(\$[A-Za-z_]\w*|\{[^{}]*\})/;
+const MERGE_PULL_REQUEST_ARG_START = /mergePullRequest\s*\(\s*input\s*:\s*(\$[A-Za-z_]\w*|\{)/;
+
+/**
+ * If `query[index]` starts a GraphQL `#`-comment, a `"""`-block string, or a `"`-string,
+ * returns the index immediately past it; otherwise returns null. Comments and strings are
+ * lexically opaque to GraphQL's real parser (their contents are never syntax), but a plain
+ * regex has no concept of either, so a `}` or a decoy field placed inside one can silently
+ * truncate or impersonate real syntax that GitHub's parser evaluates completely differently.
+ */
+function skipGraphQLNoise(query: string, index: number): number | null {
+  if (query[index] === "#") {
+    const newline = query.indexOf("\n", index);
+    return newline === -1 ? query.length : newline + 1;
+  }
+  if (query.startsWith('"""', index)) {
+    const end = query.indexOf('"""', index + 3);
+    return end === -1 ? query.length : end + 3;
+  }
+  if (query[index] === '"') {
+    let j = index + 1;
+    while (j < query.length && query[j] !== '"') {
+      j += query[j] === "\\" ? 2 : 1;
+    }
+    return Math.min(j + 1, query.length);
+  }
+  return null;
+}
+
+/** Finds the index just past the `}` that closes the object literal opening at `openIndex`. */
+function findMatchingBrace(query: string, openIndex: number): number | null {
+  let depth = 0;
+  for (let i = openIndex; i < query.length; ) {
+    const skip = skipGraphQLNoise(query, i);
+    if (skip !== null) {
+      i = skip;
+      continue;
+    }
+    if (query[i] === "{") depth += 1;
+    else if (query[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+    i += 1;
+  }
+  return null;
+}
+
+/**
+ * Reads a `fieldName: "value"` string field that appears directly inside the object
+ * literal spanning `[start, end)` — at its top level only, never one hidden inside a
+ * nested object, a `#`-comment, or a `"""`-block/`"`-string, where a plain regex would
+ * otherwise match a decoy field GitHub's real parser does not treat as the input at all.
+ */
+function extractTopLevelStringField(query: string, start: number, end: number, fieldName: string): string | null {
+  const fieldPattern = new RegExp(`^${fieldName}\\s*:\\s*"([^"]*)"`);
+  let depth = 0;
+  for (let i = start; i < end; ) {
+    const skip = skipGraphQLNoise(query, i);
+    if (skip !== null) {
+      i = skip;
+      continue;
+    }
+    if (query[i] === "{") {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+    if (query[i] === "}") {
+      depth -= 1;
+      i += 1;
+      continue;
+    }
+    if (depth === 0) {
+      const match = fieldPattern.exec(query.slice(i, end));
+      if (match !== null) return match[1];
+    }
+    i += 1;
+  }
+  return null;
+}
 
 /**
  * Extracts the pull request id that `mergePullRequest`'s `input:` argument actually
@@ -85,7 +164,7 @@ export function extractGraphQLMergePullRequestId(body: unknown): string | null {
   const calls = query.match(/mergePullRequest\s*\(/g);
   if (calls === null || calls.length !== 1) return null;
 
-  const argMatch = MERGE_PULL_REQUEST_CALL.exec(query);
+  const argMatch = MERGE_PULL_REQUEST_ARG_START.exec(query);
   if (argMatch === null) return null;
   const arg = argMatch[1];
 
@@ -96,8 +175,11 @@ export function extractGraphQLMergePullRequestId(body: unknown): string | null {
     return typeof pullRequestId === "string" ? pullRequestId : null;
   }
 
-  const literalMatch = /pullRequestId\s*:\s*"([^"]+)"/.exec(arg);
-  return literalMatch !== null ? literalMatch[1] : null;
+  const openIndex = argMatch.index + argMatch[0].length - 1;
+  const closeIndex = findMatchingBrace(query, openIndex);
+  if (closeIndex === null) return null;
+
+  return extractTopLevelStringField(query, openIndex + 1, closeIndex - 1, "pullRequestId");
 }
 
 const MERGE_STATE_BY_NUMBER_QUERY =

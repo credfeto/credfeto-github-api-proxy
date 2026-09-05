@@ -174,6 +174,34 @@ describe("extractGraphQLMergePullRequestId", () => {
   it("returns null for a non-object body", () => {
     expect(extractGraphQLMergePullRequestId(null)).toBeNull();
   });
+
+  it("does not let a decoy pullRequestId hidden in a #-comment shadow the real, later field (confused-deputy bypass)", () => {
+    // GraphQL comments run from `#` to end-of-line and are insignificant to a real parser,
+    // including the `}` inside one. A regex with no concept of comments would stop at that
+    // `}` and extract the decoy, while GitHub's real parser ignores the comment entirely and
+    // merges the real, unvalidated PR instead.
+    const body = {
+      query:
+        'mutation {\n  mergePullRequest(input: {\n    clientMutationId: "x" # pullRequestId: "PR_DECOY_CLEAN" }\n    pullRequestId: "PR_REAL_TARGET"\n  }) {\n    pullRequest { merged }\n  }\n}',
+    };
+    expect(extractGraphQLMergePullRequestId(body)).toBe("PR_REAL_TARGET");
+  });
+
+  it("does not let a decoy pullRequestId hidden in a block string shadow the real, later field", () => {
+    const body = {
+      query:
+        'mutation { mergePullRequest(input: { clientMutationId: """ pullRequestId: "PR_DECOY_CLEAN" } """ pullRequestId: "PR_REAL_TARGET" }) { clientMutationId } }',
+    };
+    expect(extractGraphQLMergePullRequestId(body)).toBe("PR_REAL_TARGET");
+  });
+
+  it("does not let a decoy pullRequestId hidden in a nested object shadow the real, top-level field", () => {
+    const body = {
+      query:
+        'mutation { mergePullRequest(input: { clientMutationId: {fake: "x", pullRequestId: "PR_DECOY_CLEAN"}, pullRequestId: "PR_REAL_TARGET" }) { clientMutationId } }',
+    };
+    expect(extractGraphQLMergePullRequestId(body)).toBe("PR_REAL_TARGET");
+  });
 });
 
 // ── missing Authorization header (fail closed) ─────────────────────────────
