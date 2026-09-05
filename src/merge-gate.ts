@@ -137,13 +137,12 @@ function fetchMergeStateStatus(
   });
 }
 
-function mergeStateDenialReason(mergeStateStatus: string | null): string {
-  return `PR merge is not cleanly mergeable (mergeStateStatus: ${mergeStateStatus ?? "unknown"}); admin-bypass merges are blocked`;
-}
-
 function applyMergeStateResult(res: Response, next: NextFunction, mergeStateStatus: string | null): void {
   if (!isMergeStateAllowed(mergeStateStatus)) {
-    sendBlockedResponse(res, mergeStateDenialReason(mergeStateStatus));
+    sendBlockedResponse(
+      res,
+      `PR merge is not cleanly mergeable (mergeStateStatus: ${mergeStateStatus ?? "unknown"}); admin-bypass merges are blocked`,
+    );
     return;
   }
   next();
