@@ -9,19 +9,13 @@ import {
   serializeBody,
   buildCacheKey,
 } from "./cache.js";
+import { PROXY_USER_AGENT, redactAuthorization } from "./http-headers.js";
 import { injectInstalledVersion } from "./meta.js";
-import { GITHUB_API_HOST, rewriteJsonBody, rewriteResponseHeaders } from "./rewrite-urls.js";
+import { GITHUB_API_HOST, rewriteJsonResponseBody, rewriteResponseHeaders } from "./rewrite-urls.js";
 
 const GITHUB_UPLOADS_HOST = "uploads.github.com";
 
-const REDACTED = "[REDACTED]";
 const MAX_DIAGNOSTIC_BODY_BYTES = 64 * 1024;
-
-function redactAuthorization(headers: http.OutgoingHttpHeaders): http.OutgoingHttpHeaders {
-  const redacted: http.OutgoingHttpHeaders = { ...headers };
-  if (redacted.authorization !== undefined) redacted.authorization = REDACTED;
-  return redacted;
-}
 
 /**
  * Tees up to maxBytes of a response stream without buffering more even if the
@@ -138,6 +132,10 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   // express.raw({ type:"*/*" }) buffers everything else into req.body as a Buffer.
   // Both consume the underlying stream, so piping req would send an empty body.
   const isJsonBody = Boolean(req.is("application/json")) && req.body !== undefined && !Buffer.isBuffer(req.body);
+  const graphQLQuery: string | undefined =
+    req.path === "/graphql" && isJsonBody && typeof (req.body as Record<string, unknown>).query === "string"
+      ? ((req.body as Record<string, unknown>).query as string)
+      : undefined;
   const isBufferBody = !isJsonBody && Buffer.isBuffer(req.body) && (req.body as Buffer).length > 0;
   // Serialised once and reused both for the outgoing write and (on a 5xx) the diagnostic log.
   const serialisedJsonBody: string | undefined = isJsonBody ? (preSerialisedBody ?? JSON.stringify(req.body)) : undefined;
@@ -145,7 +143,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
   const headers: http.OutgoingHttpHeaders = {
     ...req.headers,
     host: targetHost,
-    "user-agent": req.headers["user-agent"] ?? "github-api-proxy/1.0",
+    "user-agent": req.headers["user-agent"] ?? PROXY_USER_AGENT,
     "if-none-match": undefined,
     "x-forwarded-for": undefined,
     "x-forwarded-host": undefined,
@@ -270,7 +268,7 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
         }
         const rawBody = Buffer.concat(chunks);
         const metaBody = isMetaRequest ? injectInstalledVersion(rawBody) : rawBody;
-        const body = rewriteJsonBody(metaBody, proxyOrigin);
+        const body = rewriteJsonResponseBody(metaBody, proxyOrigin, graphQLQuery);
         const statusCode = proxyRes.statusCode ?? 200;
         const etag = typeof proxyRes.headers.etag === "string" ? proxyRes.headers.etag : undefined;
         const responseHeaders: Record<string, string | string[] | undefined> = rewriteProxyHeaders(proxyRes.headers);

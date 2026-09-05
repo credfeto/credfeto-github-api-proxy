@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import request from "supertest";
 import { createApp } from "../app.js";
 import { forwardToGitHub } from "../proxy.js";
+import { mockUpstream, mockUpstreamError } from "./https-request-mock.js";
 
 // Prevent any real network calls — tests must not hit api.github.com
 vi.mock("../proxy.js", () => ({
@@ -496,5 +497,223 @@ describe("createPullRequest headRepositoryId transform", () => {
     expect(mockForward).toHaveBeenCalledOnce();
     const forwarded = mockForward.mock.calls[0][0].body as { variables: { input: { headRepositoryId?: string } } };
     expect(forwarded.variables.input.headRepositoryId).toBeUndefined();
+  });
+});
+
+// ── Merge gate ──────────────────────────────────────────────────────────────
+// Gates REST PUT .../pulls/:pull_number/merge and GraphQL mergePullRequest on
+// the PR's actual mergeStateStatus, independent of the caller's admin rights.
+
+function mergeStateByNumberBody(mergeStateStatus: string): string {
+  return JSON.stringify({ data: { repository: { pullRequest: { mergeStateStatus } } } });
+}
+
+function mergeStateByIdBody(mergeStateStatus: string): string {
+  return JSON.stringify({ data: { node: { mergeStateStatus } } });
+}
+
+describe("Merge gate — REST PUT /pulls/:pull_number/merge", () => {
+  const app = createApp(CREDENTIALS);
+  const mockForward = vi.mocked(forwardToGitHub);
+
+  beforeEach(() => {
+    mockForward.mockClear();
+  });
+
+  it.each(["CLEAN", "HAS_HOOKS", "UNSTABLE"])("forwards the merge when mergeStateStatus is %s", async (state) => {
+    mockUpstream({ body: mergeStateByNumberBody(state) });
+    const res = await request(app)
+      .put("/repos/alice/myrepo/pulls/7/merge")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ merge_method: "merge" });
+
+    expect(res.status).toBe(200);
+    expect(mockForward).toHaveBeenCalledOnce();
+  });
+
+  it.each(["BLOCKED", "BEHIND", "DIRTY", "DRAFT", "UNKNOWN"])("blocks the merge when mergeStateStatus is %s", async (state) => {
+    mockUpstream({ body: mergeStateByNumberBody(state) });
+    const res = await request(app)
+      .put("/repos/alice/myrepo/pulls/7/merge")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ merge_method: "merge" });
+
+    expect(res.status).toBe(403);
+    expect(res.body.reason).toMatch(new RegExp(state));
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("blocks the merge (fails closed) when the lookup returns a non-2xx status", async () => {
+    mockUpstream({ statusCode: 502, body: "bad gateway" });
+    const res = await request(app)
+      .put("/repos/alice/myrepo/pulls/7/merge")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ merge_method: "merge" });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("blocks the merge (fails closed) when the lookup errors over the network", async () => {
+    mockUpstreamError(new Error("connection reset"));
+
+    const res = await request(app)
+      .put("/repos/alice/myrepo/pulls/7/merge")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ merge_method: "merge" });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("does not gate unrelated PUT requests (e.g. updating the PR itself)", async () => {
+    const res = await request(app)
+      .put("/repos/alice/myrepo/pulls/7")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ title: "Updated title" });
+
+    expect(res.status).toBe(200);
+    expect(mockForward).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Merge gate — GraphQL mergePullRequest", () => {
+  const app = createApp(CREDENTIALS);
+  const mockForward = vi.mocked(forwardToGitHub);
+
+  beforeEach(() => {
+    mockForward.mockClear();
+  });
+
+  const MERGE_MUTATION = `mutation Merge($input: MergePullRequestInput!) {
+    mergePullRequest(input: $input) { pullRequest { merged } }
+  }`;
+
+  it("forwards the merge when mergeStateStatus is CLEAN", async () => {
+    mockUpstream({ body: mergeStateByIdBody("CLEAN") });
+    const res = await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ query: MERGE_MUTATION, variables: { input: { pullRequestId: "PR_kwABC" } } });
+
+    expect(res.status).toBe(200);
+    expect(mockForward).toHaveBeenCalledOnce();
+  });
+
+  it("blocks the merge when mergeStateStatus is BLOCKED", async () => {
+    mockUpstream({ body: mergeStateByIdBody("BLOCKED") });
+    const res = await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ query: MERGE_MUTATION, variables: { input: { pullRequestId: "PR_kwABC" } } });
+
+    expect(res.status).toBe(403);
+    expect(res.body.reason).toMatch(/BLOCKED/);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("blocks (fails closed) when pullRequestId is missing from the mutation input", async () => {
+    const res = await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ query: MERGE_MUTATION, variables: { input: {} } });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("does not gate enablePullRequestAutoMerge (schedules, doesn't merge immediately)", async () => {
+    const res = await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({
+        query: `mutation { enablePullRequestAutoMerge(input:{pullRequestId:"PR_kwABC"}) { pullRequest { autoMergeRequest { enabledAt } } } }`,
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockForward).toHaveBeenCalledOnce();
+  });
+
+  it("applies the gate via /api/graphql as well", async () => {
+    mockUpstream({ body: mergeStateByIdBody("DIRTY") });
+    const res = await request(app)
+      .post("/api/graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ query: MERGE_MUTATION, variables: { input: { pullRequestId: "PR_kwABC" } } });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+});
+
+// ── Path normalisation (dot-segment bypass prevention) ──────────────────────
+// req.path/req.url are matched literally by the blocklist and merge gate, but
+// forwardToGitHub's `new URL(...)` collapses `..` segments before forwarding.
+// A path like `/pulls/7/x/../merge` used to fail every blocklist/merge-gate
+// regex (never matching their exact shape) while still resolving to the real
+// gated endpoint once forwarded, bypassing the check entirely. The app must
+// collapse dot-segments before any blocklist/gate/route matching runs.
+
+describe("Path normalisation — dot-segment bypass prevention", () => {
+  const app = createApp(CREDENTIALS);
+  const mockForward = vi.mocked(forwardToGitHub);
+
+  beforeEach(() => {
+    mockForward.mockClear();
+  });
+
+  it("still gates a REST merge whose path is disguised with a dot-segment", async () => {
+    mockUpstream({ body: mergeStateByNumberBody("BLOCKED") });
+    const res = await request(app)
+      .put("/repos/alice/myrepo/pulls/7/x/../merge")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ merge_method: "merge" });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("still forwards a dot-segment-disguised REST merge once mergeStateStatus is clean", async () => {
+    mockUpstream({ body: mergeStateByNumberBody("CLEAN") });
+    const res = await request(app)
+      .put("/repos/alice/myrepo/pulls/7/x/../merge")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ merge_method: "merge" });
+
+    expect(res.status).toBe(200);
+    expect(mockForward).toHaveBeenCalledOnce();
+  });
+
+  it("still blocks POST /merges (no-PR merge) whose path is disguised with a dot-segment", async () => {
+    const res = await request(app)
+      .post("/repos/alice/myrepo/x/../merges")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ base: "main", head: "feature" });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("still blocks POST /merge-upstream whose path is disguised with a dot-segment", async () => {
+    const res = await request(app)
+      .post("/repos/alice/myrepo/x/../merge-upstream")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ branch: "main" });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("still routes a dot-segment-disguised /graphql path through the GraphQL merge gate", async () => {
+    mockUpstream({ body: mergeStateByIdBody("BLOCKED") });
+    const res = await request(app)
+      .post("/decoy/../graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({
+        query: `mutation { mergePullRequest(input:{pullRequestId:"PR_kwABC"}) { pullRequest { merged } } }`,
+      });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
   });
 });

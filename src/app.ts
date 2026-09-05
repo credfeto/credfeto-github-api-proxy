@@ -1,7 +1,8 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { createAuthMiddleware, type CredentialPair } from "./auth.js";
-import { checkRestBlock, checkGraphQLBlock } from "./blocklist.js";
+import { checkRestBlock, checkGraphQLBlock, sendBlockedResponse } from "./blocklist.js";
+import { createRestMergeGate, createGraphQLMergeGate } from "./merge-gate.js";
 import { forwardToGitHub } from "./proxy.js";
 import { transformCreatePullRequest } from "./transform.js";
 import { ResponseCache } from "./cache.js";
@@ -25,6 +26,29 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   const ttlMs = rawTtl * 1000;
   const etagTtlMs = Math.max(ttlMs, 86_400_000);
   const responseCache = new ResponseCache(new InMemoryETagStore(etagTtlMs), new InMemoryResponseCache(ttlMs));
+
+  // ── Collapse dot-segments before any routing, blocklist, or gate check ───
+  //
+  // Express's own path matching (req.path/req.url) is built on the legacy,
+  // non-normalising url.parse(), so a path like `/pulls/1/x/../merge` is
+  // matched and routed literally. But forwardToGitHub (proxy.ts) builds the
+  // real outbound request with `new URL(...)`, which DOES collapse `..`
+  // segments per the URL Living Standard — so that request lands on
+  // `/pulls/1/merge` on the real GitHub API. Without this normalisation, a
+  // dot-segment path fails every blocklist/merge-gate regex (they never see
+  // the collapsed form) while still resolving to the exact endpoint those
+  // checks exist to gate, bypassing them entirely. Normalising req.url here,
+  // before anything else runs, ensures every later check and the final
+  // forward all agree on the same path.
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    try {
+      const normalized = new URL(req.url, "http://placeholder");
+      req.url = normalized.pathname + normalized.search;
+    } catch {
+      // Malformed URL: leave req.url as-is: downstream will reject invalid URLs.
+    }
+    next();
+  });
 
   // ── Normalise Enterprise-shaped paths to github.com equivalents ──────────
   //
@@ -90,29 +114,30 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   app.use((req: Request, res: Response, next: NextFunction) => {
     const result = checkRestBlock(req.method, req.path);
     if (result.blocked) {
-      res.status(403).json({
-        message: "Operation blocked by proxy policy",
-        reason: result.reason,
-        method: req.method,
-        path: req.path,
-      });
+      sendBlockedResponse(res, result.reason, { method: req.method, path: req.path });
       return;
     }
     next();
   });
 
+  // ── REST merge gate ──────────────────────────────────────────────────────
+  // Independently verifies a PR is cleanly mergeable before forwarding a merge
+  // request, so a caller whose underlying PAT has admin-bypass rights cannot
+  // use this proxy to land a PR that fails required reviews/status checks.
+  app.use(createRestMergeGate());
+
   // ── GraphQL mutation blocklist ─────────────────────────────────────────────
   app.post("/graphql", (req: Request, res: Response, next: NextFunction) => {
     const result = checkGraphQLBlock(req.body);
     if (result.blocked) {
-      res.status(403).json({
-        message: "Operation blocked by proxy policy",
-        reason: result.reason,
-      });
+      sendBlockedResponse(res, result.reason);
       return;
     }
     next();
   });
+
+  // ── GraphQL merge gate ───────────────────────────────────────────────────
+  app.post("/graphql", createGraphQLMergeGate());
 
   // ── GraphQL mutation transforms ────────────────────────────────────────────
   // Applied after the blocklist so blocked mutations never reach this stage.

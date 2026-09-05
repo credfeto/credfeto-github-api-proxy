@@ -65,6 +65,20 @@ describe("checkRestBlock — git smart-HTTP push", () => {
   });
 });
 
+describe("checkRestBlock — no-PR merge endpoints", () => {
+  it("blocks POST /repos/:owner/:repo/merges (merge a branch, no PR)", () => {
+    expect(checkRestBlock("POST", "/repos/alice/myrepo/merges")).toMatchObject({ blocked: true });
+  });
+
+  it("blocks POST /repos/:owner/:repo/merge-upstream (sync fork)", () => {
+    expect(checkRestBlock("POST", "/repos/alice/myrepo/merge-upstream")).toMatchObject({ blocked: true });
+  });
+
+  it("allows PUT /repos/:owner/:repo/pulls/:pull_number/merge (goes through the merge gate instead)", () => {
+    expect(checkRestBlock("PUT", "/repos/alice/myrepo/pulls/7/merge")).toMatchObject({ blocked: false });
+  });
+});
+
 describe("checkRestBlock — allowed operations", () => {
   it("allows GET /repos/:owner/:repo/issues", () => {
     expect(checkRestBlock("GET", "/repos/alice/myrepo/issues")).toMatchObject({ blocked: false });
@@ -133,6 +147,36 @@ describe("extractGraphQLMutations", () => {
     expect(names).toContain("createRef");
     expect(names).toContain("updateRef");
   });
+
+  it("returns mergeBranch for a mergeBranch mutation", () => {
+    const q = `mutation { mergeBranch(input:{}) { mergeCommit { oid } } }`;
+    expect(extractGraphQLMutations({ query: q })).toContain("mergeBranch");
+  });
+
+  it("does not let a leading GraphQL comment hide a blocked mutation", () => {
+    const q = `# just a helpful comment\nmutation { createCommitOnBranch(input: {}) { clientMutationId } }`;
+    expect(extractGraphQLMutations({ query: q })).toContain("createCommitOnBranch");
+  });
+
+  it("does not let multiple leading comment lines hide a blocked mutation", () => {
+    const q = `# one\n  # two\n\nmutation { mergeBranch(input:{}) { mergeCommit { oid } } }`;
+    expect(extractGraphQLMutations({ query: q })).toContain("mergeBranch");
+  });
+
+  it("still returns empty for a query preceded by a leading comment", () => {
+    const q = `# a comment\nquery { viewer { login } }`;
+    expect(extractGraphQLMutations({ query: q })).toEqual([]);
+  });
+
+  it("does not let a leading query operation hide a blocked mutation selected via operationName", () => {
+    const q = `query Noop { viewer { login } }\nmutation DoIt { createRef(input:{}) { ref { name } } }`;
+    expect(extractGraphQLMutations({ query: q, operationName: "DoIt" })).toContain("createRef");
+  });
+
+  it("returns empty for a document with no mutation operation at all, even with other operations present", () => {
+    const q = `query One { viewer { login } }\nquery Two { viewer { login } }`;
+    expect(extractGraphQLMutations({ query: q, operationName: "Two" })).toEqual([]);
+  });
 });
 
 describe("checkGraphQLBlock", () => {
@@ -156,6 +200,14 @@ describe("checkGraphQLBlock", () => {
     expect(checkGraphQLBlock(body)).toMatchObject({ blocked: true });
   });
 
+  it("blocks mergeBranch", () => {
+    const body = { query: `mutation { mergeBranch(input:{}) { mergeCommit { oid } } }` };
+    expect(checkGraphQLBlock(body)).toMatchObject({
+      blocked: true,
+      reason: expect.stringMatching(/mergeBranch/),
+    });
+  });
+
   it("allows createIssue mutation", () => {
     const body = { query: `mutation { createIssue(input:{repositoryId:"x",title:"y"}) { issue { number } } }` };
     expect(checkGraphQLBlock(body)).toMatchObject({ blocked: false });
@@ -163,6 +215,11 @@ describe("checkGraphQLBlock", () => {
 
   it("allows addComment mutation", () => {
     const body = { query: `mutation { addComment(input:{subjectId:"x",body:"hi"}) { commentEdge { node { id } } } }` };
+    expect(checkGraphQLBlock(body)).toMatchObject({ blocked: false });
+  });
+
+  it("allows mergePullRequest mutation (handled by the merge gate instead)", () => {
+    const body = { query: `mutation { mergePullRequest(input:{pullRequestId:"PR_x"}) { pullRequest { merged } } }` };
     expect(checkGraphQLBlock(body)).toMatchObject({ blocked: false });
   });
 
@@ -185,5 +242,10 @@ describe("checkGraphQLBlock", () => {
   it("returns not-blocked for non-object body", () => {
     expect(checkGraphQLBlock(null)).toMatchObject({ blocked: false });
     expect(checkGraphQLBlock("string")).toMatchObject({ blocked: false });
+  });
+
+  it("fails closed for a top-level array body instead of silently allowing it through (batched-request bypass)", () => {
+    const body = [{ query: `mutation { mergePullRequest(input:{pullRequestId:"PR_x"}) { pullRequest { merged } } }` }];
+    expect(checkGraphQLBlock(body)).toMatchObject({ blocked: true });
   });
 });

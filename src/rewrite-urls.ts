@@ -6,7 +6,7 @@
 // html_url fields (github.com, the web UI) are untouched by construction: they
 // never contain the api.github.com host this module matches on.
 
-import { MAX_JSON_WALK_DEPTH, parseJsonBody } from "./json.js";
+import { type JsonVisitor, parseJsonBody, walkJson } from "./json.js";
 
 export const GITHUB_API_HOST = "api.github.com";
 
@@ -27,42 +27,57 @@ export function rewriteEmbeddedApiGithubUrls(text: string, proxyOrigin: string):
   return text.replace(API_GITHUB_URL_PATTERN, () => proxyOrigin);
 }
 
-function walkAndRewrite(value: unknown, proxyOrigin: string, depth = 0): [unknown, boolean] {
-  if (depth > MAX_JSON_WALK_DEPTH) return [value, false];
-  if (typeof value === "string") {
-    const rewritten = rewriteIfPresent(value, proxyOrigin);
-    return [rewritten, rewritten !== value];
-  }
-  if (Array.isArray(value)) {
-    let changed = false;
-    const result = value.map((item) => {
-      const [rewrittenItem, itemChanged] = walkAndRewrite(item, proxyOrigin, depth + 1);
-      if (itemChanged) changed = true;
-      return rewrittenItem;
-    });
-    return [result, changed];
-  }
-  if (value !== null && typeof value === "object") {
-    let changed = false;
-    const result: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      const [rewrittenVal, valChanged] = walkAndRewrite(val, proxyOrigin, depth + 1);
-      if (valChanged) changed = true;
-      result[key] = rewrittenVal;
-    }
-    return [result, changed];
-  }
-  return [value, false];
+const VIEWER_CAN_MERGE_AS_ADMIN_FIELD = "viewerCanMergeAsAdmin";
+
+// Strips GraphQL `#`-comments (valid anywhere in a document, and equivalent to
+// whitespace per spec) so one inserted between an alias and the field name —
+// e.g. "x: #hide\nviewerCanMergeAsAdmin" — cannot hide the alias from the
+// pattern below.
+function stripGraphQLComments(query: string): string {
+  return query.replace(/#[^\n]*/g, "");
 }
 
-// Parses `body` as JSON, recursively rewrites every embedded api.github.com
-// URL in its string values, and re-serialises. Malformed JSON is returned
-// unchanged, and the original Buffer is returned as-is when nothing needed
-// rewriting.
-export function rewriteJsonBody(body: Buffer, proxyOrigin: string): Buffer {
-  // Cheap pre-check: skip the parse/walk/stringify pass entirely for the
-  // common case of a response with no api.github.com occurrence at all.
-  if (!body.includes(GITHUB_API_HOST)) {
+// A GraphQL response key is `viewerCanMergeAsAdmin` itself, or whatever alias
+// the query gave it (`x: viewerCanMergeAsAdmin`) — aliasing renames the key
+// in the response entirely, so masking by the literal field name alone would
+// let an aliased request read the true value straight through.
+function findViewerCanMergeAsAdminAliases(query: string): Set<string> {
+  const aliases = new Set<string>([VIEWER_CAN_MERGE_AS_ADMIN_FIELD]);
+  const aliasPattern = /(\w+)\s*:\s*viewerCanMergeAsAdmin\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = aliasPattern.exec(stripGraphQLComments(query))) !== null) {
+    aliases.add(m[1]);
+  }
+  return aliases;
+}
+
+function rewriteAndDenyAdminMergeVisitor(proxyOrigin: string, maskKeys: ReadonlySet<string>): JsonVisitor {
+  return (value, key) => {
+    if (key !== undefined && maskKeys.has(key) && value === true) {
+      return [false, true];
+    }
+    if (typeof value !== "string") return undefined;
+    const rewritten = rewriteIfPresent(value, proxyOrigin);
+    return [rewritten, rewritten !== value];
+  };
+}
+
+// Combines the URL-rewrite and admin-merge-deny visitors into a single
+// parse/walk/stringify pass, since every proxied JSON response body needs
+// both transforms applied and a GraphQL PR response commonly carries both an
+// api.github.com URL and viewerCanMergeAsAdmin.
+//
+// graphQLQuery is the original request's GraphQL query text, or undefined for
+// a REST response: that field only ever appears in GraphQL PR responses, so
+// skipping the extra body scan for it on REST responses (the vast majority of
+// traffic) avoids a second full Buffer.includes() pass on every response that
+// doesn't mention api.github.com. Passing the query (rather than a plain
+// boolean) lets the mask cover any alias the query gave the field.
+export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string, graphQLQuery: string | undefined): Buffer {
+  const mightRewriteUrls = body.includes(GITHUB_API_HOST);
+  const maskKeys = graphQLQuery === undefined ? undefined : findViewerCanMergeAsAdminAliases(graphQLQuery);
+  const mightDenyAdminMerge = maskKeys !== undefined && [...maskKeys].some((key) => body.includes(key));
+  if (!mightRewriteUrls && !mightDenyAdminMerge) {
     return body;
   }
 
@@ -71,13 +86,17 @@ export function rewriteJsonBody(body: Buffer, proxyOrigin: string): Buffer {
     return body;
   }
 
-  const [rewritten, changed] = walkAndRewrite(parsed, proxyOrigin);
+  const [rewritten, changed] = walkJson(
+    parsed,
+    rewriteAndDenyAdminMergeVisitor(proxyOrigin, maskKeys ?? new Set([VIEWER_CAN_MERGE_AS_ADMIN_FIELD])),
+  );
   if (!changed) return body;
   return Buffer.from(JSON.stringify(rewritten), "utf8");
 }
 
-// Cheap pre-check mirroring rewriteJsonBody's: most header values (date, etag,
-// x-ratelimit-*, ...) never contain the host, so skip the regex pass for them.
+// Cheap pre-check mirroring rewriteJsonResponseBody's: most header values
+// (date, etag, x-ratelimit-*, ...) never contain the host, so skip the regex
+// pass for them.
 function rewriteIfPresent(value: string, proxyOrigin: string): string {
   return value.includes(GITHUB_API_HOST) ? rewriteEmbeddedApiGithubUrls(value, proxyOrigin) : value;
 }

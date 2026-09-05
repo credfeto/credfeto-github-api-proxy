@@ -11,9 +11,20 @@
  * PR operations, Actions reads, etc.
  */
 
+import type { Response } from "express";
+
 export interface BlockResult {
   blocked: boolean;
   reason?: string;
+}
+
+/** Sends the standard 403 "blocked by proxy policy" response, optionally with extra fields (e.g. method/path). */
+export function sendBlockedResponse(res: Response, reason: string | undefined, extra?: Record<string, unknown>): void {
+  res.status(403).json({
+    message: "Operation blocked by proxy policy",
+    reason,
+    ...extra,
+  });
 }
 
 /** REST paths that must be blocked, keyed by HTTP method(s). */
@@ -61,18 +72,34 @@ const BLOCKED_REST: Array<{ methods: string[]; pattern: RegExp; reason: string }
     pattern: /\/info\/refs.*service=git-receive-pack/i,
     reason: "info/refs?service=git-receive-pack is the advertisement phase of git push",
   },
+  // --- No-PR merge endpoints ---
+  // These merge branches directly with no pull request involved, so there is
+  // no review/status-check gate for the merge-gate module to verify against.
+  {
+    methods: ["POST"],
+    pattern: /^\/repos\/[^/]+\/[^/]+\/merges(?:\/|\?|$)/i,
+    reason: "POST /merges merges a branch directly without going through a pull request",
+  },
+  {
+    methods: ["POST"],
+    pattern: /^\/repos\/[^/]+\/[^/]+\/merge-upstream(?:\/|\?|$)/i,
+    reason: "merge-upstream syncs a fork with its upstream without a pull request or review",
+  },
 ];
 
 /**
- * GraphQL mutation names that create, move, or delete git refs/commits.
- * Queries are always allowed.  Non-git mutations (createIssue, addComment,
- * etc.) are also allowed.
+ * GraphQL mutation names that create, move, or delete git refs/commits, or
+ * merge branches with no pull request/review involved. Queries are always
+ * allowed. Non-git mutations (createIssue, addComment, etc.) are also
+ * allowed. Keyed by mutation name so each gets its own reason text.
  */
-const BLOCKED_GRAPHQL_MUTATIONS = new Set([
-  "createCommitOnBranch",
-  "createRef",
-  "updateRef",
-  "deleteRef",
+const GIT_OBJECT_MUTATIONS = ["createCommitOnBranch", "createRef", "updateRef", "deleteRef"];
+
+const BLOCKED_GRAPHQL_MUTATIONS: ReadonlyMap<string, string> = new Map([
+  ...GIT_OBJECT_MUTATIONS.map(
+    (name): [string, string] => [name, `GraphQL mutation '${name}' creates or manipulates git objects`],
+  ),
+  ["mergeBranch", "GraphQL mutation 'mergeBranch' merges a branch directly without going through a pull request"],
 ]);
 
 /** Check whether a REST request should be blocked. */
@@ -88,21 +115,27 @@ export function checkRestBlock(method: string, path: string): BlockResult {
 }
 
 /**
- * Extract the top-level operation names from a GraphQL request body.
- * Returns an empty array for queries (they start with "query" or "{") and
- * for any body that cannot be parsed.
+ * Extract the top-level operation names from a GraphQL request body: named
+ * mutations (`mutation Foo(` or `mutation Foo {`) plus any of
+ * `candidateNames` found as a field call anywhere in the document. Returns
+ * an empty array for a document with no mutation operation at all, and for
+ * any body that cannot be parsed.
+ *
+ * A GraphQL document can define several operations (e.g. a harmless `query`
+ * alongside the real `mutation`) and select which one actually runs via a
+ * separate `operationName` field, so this scans the *whole* document for a
+ * mutation rather than only checking how it starts — otherwise a leading
+ * query operation would hide a later mutation that `operationName` selects.
  *
  * We only inspect the operation type — never execute user-supplied code.
  */
-export function extractGraphQLMutations(body: unknown): string[] {
+export function extractGraphQLMutationNames(body: unknown, candidateNames: Iterable<string>): string[] {
   if (!body || typeof body !== "object") return [];
   const { query } = body as Record<string, unknown>;
   if (typeof query !== "string") return [];
 
-  // Quick bail-out: if the document starts with "query" or "{" it's a read
-  const trimmed = query.trimStart();
-  if (trimmed.startsWith("query") || trimmed.startsWith("{")) return [];
-  if (!trimmed.startsWith("mutation")) return [];
+  // Quick bail-out: no "mutation" keyword anywhere means no mutation operation.
+  if (!/\bmutation\b/.test(query)) return [];
 
   // Extract named mutations: `mutation Foo(` or `mutation Foo {`
   const names: string[] = [];
@@ -114,25 +147,37 @@ export function extractGraphQLMutations(body: unknown): string[] {
 
   // Also extract the field names called inside mutation bodies
   // e.g. `{ createCommitOnBranch(...) { ... } }`
-  // Simple heuristic: find known blocked names in the mutation string
-  for (const blocked of BLOCKED_GRAPHQL_MUTATIONS) {
-    if (query.includes(blocked)) {
-      names.push(blocked);
+  // Simple heuristic: find each candidate name in the mutation string
+  for (const candidate of candidateNames) {
+    if (query.includes(candidate)) {
+      names.push(candidate);
     }
   }
 
   return [...new Set(names)];
 }
 
+/** Extract the top-level mutation names known to the blocklist from a GraphQL request body. */
+export function extractGraphQLMutations(body: unknown): string[] {
+  return extractGraphQLMutationNames(body, BLOCKED_GRAPHQL_MUTATIONS.keys());
+}
+
 /** Check whether a GraphQL request body contains a blocked mutation. */
 export function checkGraphQLBlock(body: unknown): BlockResult {
+  // extractGraphQLMutationNames only recognises a plain `{ query, variables }`
+  // object; a top-level array (batched operations) has no `.query` of its own,
+  // so mutation detection would silently see nothing and fail open. GitHub's
+  // GraphQL API does not document support for batched requests, so there is no
+  // legitimate use for one here — fail closed instead.
+  if (Array.isArray(body)) {
+    return { blocked: true, reason: "Batched/array GraphQL request bodies are not supported by this proxy" };
+  }
+
   const names = extractGraphQLMutations(body);
   for (const name of names) {
-    if (BLOCKED_GRAPHQL_MUTATIONS.has(name)) {
-      return {
-        blocked: true,
-        reason: `GraphQL mutation '${name}' creates or manipulates git objects`,
-      };
+    const reason = BLOCKED_GRAPHQL_MUTATIONS.get(name);
+    if (reason !== undefined) {
+      return { blocked: true, reason };
     }
   }
   return { blocked: false };
