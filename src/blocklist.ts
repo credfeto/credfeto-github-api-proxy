@@ -164,6 +164,15 @@ export function extractGraphQLMutations(body: unknown): string[] {
 
 /** Check whether a GraphQL request body contains a blocked mutation. */
 export function checkGraphQLBlock(body: unknown): BlockResult {
+  // extractGraphQLMutationNames only recognises a plain `{ query, variables }`
+  // object; a top-level array (batched operations) has no `.query` of its own,
+  // so mutation detection would silently see nothing and fail open. GitHub's
+  // GraphQL API does not document support for batched requests, so there is no
+  // legitimate use for one here — fail closed instead.
+  if (Array.isArray(body)) {
+    return { blocked: true, reason: "Batched/array GraphQL request bodies are not supported by this proxy" };
+  }
+
   const names = extractGraphQLMutations(body);
   for (const name of names) {
     const reason = BLOCKED_GRAPHQL_MUTATIONS.get(name);

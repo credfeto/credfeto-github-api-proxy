@@ -243,4 +243,9 @@ describe("checkGraphQLBlock", () => {
     expect(checkGraphQLBlock(null)).toMatchObject({ blocked: false });
     expect(checkGraphQLBlock("string")).toMatchObject({ blocked: false });
   });
+
+  it("fails closed for a top-level array body instead of silently allowing it through (batched-request bypass)", () => {
+    const body = [{ query: `mutation { mergePullRequest(input:{pullRequestId:"PR_x"}) { pullRequest { merged } } }` }];
+    expect(checkGraphQLBlock(body)).toMatchObject({ blocked: true });
+  });
 });
