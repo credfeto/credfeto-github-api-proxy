@@ -30,8 +30,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
 }
 
-function getAuthorization(req: Request): string {
-  return req.headers.authorization as string;
+function getAuthorization(req: Request): string | undefined {
+  const { authorization } = req.headers;
+  return typeof authorization === "string" ? authorization : undefined;
 }
 
 const LOOKUP_TIMEOUT_MS = 10_000;
@@ -170,10 +171,16 @@ export function createRestMergeGate(): (req: Request, res: Response, next: NextF
       return;
     }
 
+    const authorization = getAuthorization(req);
+    if (authorization === undefined) {
+      sendBlockedResponse(res, "Missing Authorization header; failing closed");
+      return;
+    }
+
     gateOnMergeState(
       MERGE_STATE_BY_NUMBER_QUERY,
       { owner: target.owner, repo: target.repo, number: target.number },
-      getAuthorization(req),
+      authorization,
       res,
       next,
     );
@@ -194,6 +201,12 @@ export function createGraphQLMergeGate(): (req: Request, res: Response, next: Ne
       return;
     }
 
-    gateOnMergeState(MERGE_STATE_BY_ID_QUERY, { id: pullRequestId }, getAuthorization(req), res, next);
+    const authorization = getAuthorization(req);
+    if (authorization === undefined) {
+      sendBlockedResponse(res, "Missing Authorization header; failing closed");
+      return;
+    }
+
+    gateOnMergeState(MERGE_STATE_BY_ID_QUERY, { id: pullRequestId }, authorization, res, next);
   };
 }

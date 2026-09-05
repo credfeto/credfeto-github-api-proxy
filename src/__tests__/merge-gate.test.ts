@@ -1,10 +1,26 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import type { Request, Response, NextFunction } from "express";
 import {
   isMergeStateAllowed,
   extractRestMergeTarget,
   isGraphQLMergePullRequestMutation,
   extractGraphQLMergePullRequestId,
+  createRestMergeGate,
+  createGraphQLMergeGate,
 } from "../merge-gate.js";
+
+function makeRes(): { status: ReturnType<typeof vi.fn>; json: ReturnType<typeof vi.fn>; _statusCode: number } {
+  const res = {
+    _statusCode: 0,
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn().mockReturnThis(),
+  };
+  res.status.mockImplementation((code: number) => {
+    res._statusCode = code;
+    return res;
+  });
+  return res;
+}
 
 // ── isMergeStateAllowed ────────────────────────────────────────────────────
 
@@ -109,5 +125,34 @@ describe("extractGraphQLMergePullRequestId", () => {
 
   it("returns null for a non-object body", () => {
     expect(extractGraphQLMergePullRequestId(null)).toBeNull();
+  });
+});
+
+// ── missing Authorization header (fail closed) ─────────────────────────────
+
+describe("createRestMergeGate — missing Authorization header", () => {
+  it("fails closed instead of forwarding a merge request with no Authorization header", () => {
+    const mw = createRestMergeGate();
+    const req = { method: "PUT", path: "/repos/alice/myrepo/pulls/42/merge", headers: {} } as unknown as Request;
+    const res = makeRes();
+    const next = vi.fn();
+    mw(req, res as unknown as Response, next as NextFunction);
+    expect(res._statusCode).toBe(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe("createGraphQLMergeGate — missing Authorization header", () => {
+  it("fails closed instead of forwarding a mergePullRequest mutation with no Authorization header", () => {
+    const mw = createGraphQLMergeGate();
+    const req = {
+      headers: {},
+      body: { query: `mutation { mergePullRequest(input:{pullRequestId:"PR_x"}) { pullRequest { merged } } }` },
+    } as unknown as Request;
+    const res = makeRes();
+    const next = vi.fn();
+    mw(req, res as unknown as Response, next as NextFunction);
+    expect(res._statusCode).toBe(403);
+    expect(next).not.toHaveBeenCalled();
   });
 });
