@@ -12,7 +12,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 ### Security
 - Updated esbuild to 0.28.1 to fix path traversal vulnerability in local development server (GHSA-g7r4-m6w7-qqqr)
 - Pin GitHub Actions in docker-publish.yml to commit SHA instead of mutable release tag, and enable Dependabot's github-actions ecosystem to keep the pins updated
-- Gate PR merges (REST and GraphQL) on the pull request's actual mergeability, so a proxy token backed by a repo-admin PAT can no longer bypass required reviews/status checks; hard-block the no-PR merge endpoints (merges, merge-upstream, mergeBranch) and mask viewerCanMergeAsAdmin in GraphQL responses
+- Gate PR merges (REST and GraphQL) on the pull request's actual mergeability, so a proxy token backed by a repo-admin PAT can no longer bypass required reviews/status checks; hard-block the no-PR merge endpoints (merges, merge-upstream, mergeBranch); mask viewerCanMergeAsAdmin in GraphQL responses; and collapse dot-segment paths (e.g. /pulls/1/x/../merge) before routing/blocklist/gate checks so they cannot be used to reach a gated endpoint while evading the check
 ### Added
 - Initial implementation: GitHub API proxy that blocks all git-write operations while passing through issues, PRs, and CI reads
 - Docker support via Dockerfile, docker-compose, and distroless/nodejs20 runtime image running as nonroot
