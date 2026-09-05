@@ -114,21 +114,61 @@ describe("isGraphQLMergePullRequestMutation", () => {
 // ── extractGraphQLMergePullRequestId ───────────────────────────────────────
 
 describe("extractGraphQLMergePullRequestId", () => {
-  it("extracts pullRequestId from variables.input", () => {
-    const body = { variables: { input: { pullRequestId: "PR_kwABC" } } };
+  const MUTATION_VAR_INPUT = `mutation($input: MergePullRequestInput!) { mergePullRequest(input: $input) { pullRequest { merged } } }`;
+
+  it("extracts pullRequestId from the variable actually bound to the input: argument", () => {
+    const body = { query: MUTATION_VAR_INPUT, variables: { input: { pullRequestId: "PR_kwABC" } } };
     expect(extractGraphQLMergePullRequestId(body)).toBe("PR_kwABC");
   });
 
-  it("returns null when variables.input is missing", () => {
-    expect(extractGraphQLMergePullRequestId({ variables: {} })).toBeNull();
+  it("extracts pullRequestId from an inline literal input: argument", () => {
+    const body = { query: `mutation { mergePullRequest(input: {pullRequestId: "PR_kwABC"}) { pullRequest { merged } } }` };
+    expect(extractGraphQLMergePullRequestId(body)).toBe("PR_kwABC");
   });
 
-  it("returns null when pullRequestId is missing from input", () => {
-    expect(extractGraphQLMergePullRequestId({ variables: { input: { mergeMethod: "MERGE" } } })).toBeNull();
+  it("does not trust a same-named variables.input the call's argument does not actually reference (confused-deputy bypass)", () => {
+    // The mutation's `input:` argument is an inline literal targeting the real PR; `variables.input`
+    // is a decoy that the query never references. Extraction must follow the actual argument, not
+    // the conveniently-named-but-unused variables key, otherwise the merge gate would validate the
+    // decoy's mergeability while GitHub executes the merge against the real, unvalidated PR.
+    const body = {
+      query: `mutation { mergePullRequest(input: {pullRequestId: "PR_REAL_TARGET"}) { clientMutationId } }`,
+      variables: { input: { pullRequestId: "PR_DECOY_CLEAN" } },
+    };
+    expect(extractGraphQLMergePullRequestId(body)).toBe("PR_REAL_TARGET");
   });
 
-  it("returns null when pullRequestId is not a string", () => {
-    expect(extractGraphQLMergePullRequestId({ variables: { input: { pullRequestId: 123 } } })).toBeNull();
+  it("resolves via whichever variable name the input: argument actually references, not a literal 'input' key", () => {
+    const body = {
+      query: `mutation($x: MergePullRequestInput!) { mergePullRequest(input: $x) { pullRequest { merged } } }`,
+      variables: { input: { pullRequestId: "PR_DECOY_CLEAN" }, x: { pullRequestId: "PR_REAL_TARGET" } },
+    };
+    expect(extractGraphQLMergePullRequestId(body)).toBe("PR_REAL_TARGET");
+  });
+
+  it("returns null (fail closed) when the referenced variable is missing", () => {
+    expect(extractGraphQLMergePullRequestId({ query: MUTATION_VAR_INPUT, variables: {} })).toBeNull();
+  });
+
+  it("returns null (fail closed) when pullRequestId is missing from the referenced variable's input", () => {
+    const body = { query: MUTATION_VAR_INPUT, variables: { input: { mergeMethod: "MERGE" } } };
+    expect(extractGraphQLMergePullRequestId(body)).toBeNull();
+  });
+
+  it("returns null (fail closed) when pullRequestId is not a string", () => {
+    const body = { query: MUTATION_VAR_INPUT, variables: { input: { pullRequestId: 123 } } };
+    expect(extractGraphQLMergePullRequestId(body)).toBeNull();
+  });
+
+  it("returns null (fail closed) for a document with more than one mergePullRequest( call", () => {
+    const body = {
+      query: `mutation { a: mergePullRequest(input: {pullRequestId: "PR_a"}) { clientMutationId } b: mergePullRequest(input: {pullRequestId: "PR_b"}) { clientMutationId } }`,
+    };
+    expect(extractGraphQLMergePullRequestId(body)).toBeNull();
+  });
+
+  it("returns null (fail closed) when there is no query string at all", () => {
+    expect(extractGraphQLMergePullRequestId({ variables: { input: { pullRequestId: "PR_kwABC" } } })).toBeNull();
   });
 
   it("returns null for a non-object body", () => {
