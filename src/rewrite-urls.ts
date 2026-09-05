@@ -53,7 +53,7 @@ const denyAdminMergeVisitor: JsonVisitor = (value, key) => {
 // ever appears in GraphQL PR responses, so skipping the extra body scan for it
 // on REST responses (the vast majority of traffic) avoids a second full
 // Buffer.includes() pass on every response that doesn't mention api.github.com.
-export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string, isGraphQLResponse = true): Buffer {
+export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string, isGraphQLResponse: boolean): Buffer {
   const mightRewriteUrls = body.includes(GITHUB_API_HOST);
   const mightDenyAdminMerge = isGraphQLResponse && body.includes(VIEWER_CAN_MERGE_AS_ADMIN_FIELD);
   if (!mightRewriteUrls && !mightDenyAdminMerge) {

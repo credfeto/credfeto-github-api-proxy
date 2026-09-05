@@ -5,6 +5,15 @@ import { vi } from "vitest";
 
 export type UpstreamSetup = { statusCode?: number; headers?: Record<string, string>; body?: string };
 
+/** Builds a fake ClientRequest stub shared by every https.request mock in this file. */
+function createFakeClientRequest(): ClientRequest {
+  return Object.assign(new EventEmitter(), {
+    setHeader: vi.fn(),
+    write: vi.fn(),
+    end: vi.fn(),
+  }) as unknown as ClientRequest;
+}
+
 /**
  * Installs a one-shot spy on https.request. The fake response fires via
  * process.nextTick so the proxy has time to set up listeners or call pipe first.
@@ -30,11 +39,7 @@ export function mockUpstream(setup: UpstreamSetup = {}): { getOptions: () => htt
       }),
     }) as unknown as IncomingMessage;
 
-    const fakeReq = Object.assign(new EventEmitter(), {
-      setHeader: vi.fn(),
-      write: vi.fn(),
-      end: vi.fn(),
-    }) as unknown as ClientRequest;
+    const fakeReq = createFakeClientRequest();
 
     // Fire the upstream response asynchronously
     process.nextTick(() => {
@@ -57,11 +62,7 @@ export function mockUpstream(setup: UpstreamSetup = {}): { getOptions: () => htt
 /** Installs a one-shot spy on https.request whose request emits a network-level "error" instead of a response. */
 export function mockUpstreamError(error: Error): void {
   vi.spyOn(https, "request").mockImplementationOnce((() => {
-    const fakeReq = Object.assign(new EventEmitter(), {
-      setHeader: vi.fn(),
-      write: vi.fn(),
-      end: vi.fn(),
-    }) as unknown as ClientRequest;
+    const fakeReq = createFakeClientRequest();
 
     process.nextTick(() => fakeReq.emit("error", error));
 
