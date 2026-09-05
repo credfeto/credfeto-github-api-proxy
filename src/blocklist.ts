@@ -114,6 +114,20 @@ export function checkRestBlock(method: string, path: string): BlockResult {
   return { blocked: false };
 }
 
+// Strips leading whitespace and `#`-comment lines (valid anywhere in a
+// GraphQL document per spec) so a document like "# hi\nmutation{...}" is not
+// mistaken for a query/unrecognised operation and skipped by the operation
+// type check below.
+function stripLeadingGraphQLNoise(query: string): string {
+  let rest = query;
+  for (;;) {
+    const trimmed = rest.replace(/^\s+/, "");
+    if (!trimmed.startsWith("#")) return trimmed;
+    const newlineIndex = trimmed.indexOf("\n");
+    rest = newlineIndex === -1 ? "" : trimmed.slice(newlineIndex + 1);
+  }
+}
+
 /**
  * Extract the top-level operation names from a GraphQL request body: named
  * mutations (`mutation Foo(` or `mutation Foo {`) plus any of
@@ -129,7 +143,7 @@ export function extractGraphQLMutationNames(body: unknown, candidateNames: Itera
   if (typeof query !== "string") return [];
 
   // Quick bail-out: if the document starts with "query" or "{" it's a read
-  const trimmed = query.trimStart();
+  const trimmed = stripLeadingGraphQLNoise(query);
   if (trimmed.startsWith("query") || trimmed.startsWith("{")) return [];
   if (!trimmed.startsWith("mutation")) return [];
 

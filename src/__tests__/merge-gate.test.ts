@@ -78,6 +78,13 @@ describe("isGraphQLMergePullRequestMutation", () => {
     expect(isGraphQLMergePullRequestMutation(null)).toBe(false);
     expect(isGraphQLMergePullRequestMutation("string")).toBe(false);
   });
+
+  it("returns true for a mergePullRequest mutation preceded by a leading comment", () => {
+    const body = {
+      query: `# admin bypass attempt\nmutation { mergePullRequest(input:{pullRequestId:"PR_x"}) { pullRequest { merged } } }`,
+    };
+    expect(isGraphQLMergePullRequestMutation(body)).toBe(true);
+  });
 });
 
 // ── extractGraphQLMergePullRequestId ───────────────────────────────────────
