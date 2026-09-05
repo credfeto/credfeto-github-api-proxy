@@ -101,6 +101,14 @@ describe("isGraphQLMergePullRequestMutation", () => {
     };
     expect(isGraphQLMergePullRequestMutation(body)).toBe(true);
   });
+
+  it("returns true for a mergePullRequest mutation hidden behind a leading query operation and operationName", () => {
+    const body = {
+      query: `query Noop { viewer { login } }\nmutation DoIt { mergePullRequest(input:{pullRequestId:"PR_x"}) { pullRequest { merged } } }`,
+      operationName: "DoIt",
+    };
+    expect(isGraphQLMergePullRequestMutation(body)).toBe(true);
+  });
 });
 
 // ── extractGraphQLMergePullRequestId ───────────────────────────────────────
