@@ -27,22 +27,18 @@ export function rewriteEmbeddedApiGithubUrls(text: string, proxyOrigin: string):
   return text.replace(API_GITHUB_URL_PATTERN, () => proxyOrigin);
 }
 
-function rewriteUrlVisitor(proxyOrigin: string): JsonVisitor {
-  return (value) => {
+const VIEWER_CAN_MERGE_AS_ADMIN_FIELD = "viewerCanMergeAsAdmin";
+
+function rewriteAndDenyAdminMergeVisitor(proxyOrigin: string): JsonVisitor {
+  return (value, key) => {
+    if (key === VIEWER_CAN_MERGE_AS_ADMIN_FIELD && value === true) {
+      return [false, true];
+    }
     if (typeof value !== "string") return undefined;
     const rewritten = rewriteIfPresent(value, proxyOrigin);
     return [rewritten, rewritten !== value];
   };
 }
-
-const VIEWER_CAN_MERGE_AS_ADMIN_FIELD = "viewerCanMergeAsAdmin";
-
-const denyAdminMergeVisitor: JsonVisitor = (value, key) => {
-  if (key === VIEWER_CAN_MERGE_AS_ADMIN_FIELD && value === true) {
-    return [false, true];
-  }
-  return undefined;
-};
 
 // Combines the URL-rewrite and admin-merge-deny visitors into a single
 // parse/walk/stringify pass, since every proxied JSON response body needs
@@ -65,10 +61,7 @@ export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string, isGra
     return body;
   }
 
-  const urlVisitor = rewriteUrlVisitor(proxyOrigin);
-  const visit: JsonVisitor = (value, key) => denyAdminMergeVisitor(value, key) ?? urlVisitor(value, key);
-
-  const [rewritten, changed] = walkJson(parsed, visit);
+  const [rewritten, changed] = walkJson(parsed, rewriteAndDenyAdminMergeVisitor(proxyOrigin));
   if (!changed) return body;
   return Buffer.from(JSON.stringify(rewritten), "utf8");
 }
