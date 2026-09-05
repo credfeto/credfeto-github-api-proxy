@@ -645,3 +645,75 @@ describe("Merge gate — GraphQL mergePullRequest", () => {
     expect(mockForward).not.toHaveBeenCalled();
   });
 });
+
+// ── Path normalisation (dot-segment bypass prevention) ──────────────────────
+// req.path/req.url are matched literally by the blocklist and merge gate, but
+// forwardToGitHub's `new URL(...)` collapses `..` segments before forwarding.
+// A path like `/pulls/7/x/../merge` used to fail every blocklist/merge-gate
+// regex (never matching their exact shape) while still resolving to the real
+// gated endpoint once forwarded, bypassing the check entirely. The app must
+// collapse dot-segments before any blocklist/gate/route matching runs.
+
+describe("Path normalisation — dot-segment bypass prevention", () => {
+  const app = createApp(CREDENTIALS);
+  const mockForward = vi.mocked(forwardToGitHub);
+
+  beforeEach(() => {
+    mockForward.mockClear();
+  });
+
+  it("still gates a REST merge whose path is disguised with a dot-segment", async () => {
+    mockUpstream({ body: mergeStateByNumberBody("BLOCKED") });
+    const res = await request(app)
+      .put("/repos/alice/myrepo/pulls/7/x/../merge")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ merge_method: "merge" });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("still forwards a dot-segment-disguised REST merge once mergeStateStatus is clean", async () => {
+    mockUpstream({ body: mergeStateByNumberBody("CLEAN") });
+    const res = await request(app)
+      .put("/repos/alice/myrepo/pulls/7/x/../merge")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ merge_method: "merge" });
+
+    expect(res.status).toBe(200);
+    expect(mockForward).toHaveBeenCalledOnce();
+  });
+
+  it("still blocks POST /merges (no-PR merge) whose path is disguised with a dot-segment", async () => {
+    const res = await request(app)
+      .post("/repos/alice/myrepo/x/../merges")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ base: "main", head: "feature" });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("still blocks POST /merge-upstream whose path is disguised with a dot-segment", async () => {
+    const res = await request(app)
+      .post("/repos/alice/myrepo/x/../merge-upstream")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ branch: "main" });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+
+  it("still routes a dot-segment-disguised /graphql path through the GraphQL merge gate", async () => {
+    mockUpstream({ body: mergeStateByIdBody("BLOCKED") });
+    const res = await request(app)
+      .post("/decoy/../graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({
+        query: `mutation { mergePullRequest(input:{pullRequestId:"PR_kwABC"}) { pullRequest { merged } } }`,
+      });
+
+    expect(res.status).toBe(403);
+    expect(mockForward).not.toHaveBeenCalled();
+  });
+});

@@ -27,6 +27,29 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   const etagTtlMs = Math.max(ttlMs, 86_400_000);
   const responseCache = new ResponseCache(new InMemoryETagStore(etagTtlMs), new InMemoryResponseCache(ttlMs));
 
+  // ── Collapse dot-segments before any routing, blocklist, or gate check ───
+  //
+  // Express's own path matching (req.path/req.url) is built on the legacy,
+  // non-normalising url.parse(), so a path like `/pulls/1/x/../merge` is
+  // matched and routed literally. But forwardToGitHub (proxy.ts) builds the
+  // real outbound request with `new URL(...)`, which DOES collapse `..`
+  // segments per the URL Living Standard — so that request lands on
+  // `/pulls/1/merge` on the real GitHub API. Without this normalisation, a
+  // dot-segment path fails every blocklist/merge-gate regex (they never see
+  // the collapsed form) while still resolving to the exact endpoint those
+  // checks exist to gate, bypassing them entirely. Normalising req.url here,
+  // before anything else runs, ensures every later check and the final
+  // forward all agree on the same path.
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    try {
+      const normalized = new URL(req.url, "http://placeholder");
+      req.url = normalized.pathname + normalized.search;
+    } catch {
+      // Malformed URL: leave req.url as-is: downstream will reject invalid URLs.
+    }
+    next();
+  });
+
   // ── Normalise Enterprise-shaped paths to github.com equivalents ──────────
   //
   // When `GH_HOST` is set to a non-github.com host, the gh CLI uses GitHub
