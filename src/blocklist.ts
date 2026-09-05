@@ -93,13 +93,12 @@ const BLOCKED_REST: Array<{ methods: string[]; pattern: RegExp; reason: string }
  * allowed. Non-git mutations (createIssue, addComment, etc.) are also
  * allowed. Keyed by mutation name so each gets its own reason text.
  */
-const gitObjectMutationReason = (name: string): string => `GraphQL mutation '${name}' creates or manipulates git objects`;
+const GIT_OBJECT_MUTATIONS = ["createCommitOnBranch", "createRef", "updateRef", "deleteRef"];
 
 const BLOCKED_GRAPHQL_MUTATIONS: ReadonlyMap<string, string> = new Map([
-  ["createCommitOnBranch", gitObjectMutationReason("createCommitOnBranch")],
-  ["createRef", gitObjectMutationReason("createRef")],
-  ["updateRef", gitObjectMutationReason("updateRef")],
-  ["deleteRef", gitObjectMutationReason("deleteRef")],
+  ...GIT_OBJECT_MUTATIONS.map(
+    (name): [string, string] => [name, `GraphQL mutation '${name}' creates or manipulates git objects`],
+  ),
   ["mergeBranch", "GraphQL mutation 'mergeBranch' merges a branch directly without going through a pull request"],
 ]);
 

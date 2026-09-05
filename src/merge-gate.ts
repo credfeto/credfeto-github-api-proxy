@@ -141,17 +141,6 @@ function fetchMergeStateStatus(
   });
 }
 
-function applyMergeStateResult(res: Response, next: NextFunction, mergeStateStatus: string | null): void {
-  if (!isMergeStateAllowed(mergeStateStatus)) {
-    sendBlockedResponse(
-      res,
-      `PR merge is not cleanly mergeable (mergeStateStatus: ${mergeStateStatus ?? "unknown"}); admin-bypass merges are blocked`,
-    );
-    return;
-  }
-  next();
-}
-
 /** Looks up mergeStateStatus and applies the resulting allow/deny decision to the response. */
 function gateOnMergeState(
   query: string,
@@ -160,9 +149,16 @@ function gateOnMergeState(
   res: Response,
   next: NextFunction,
 ): void {
-  void fetchMergeStateStatus(query, variables, authorization).then((mergeStateStatus) =>
-    applyMergeStateResult(res, next, mergeStateStatus),
-  );
+  void fetchMergeStateStatus(query, variables, authorization).then((mergeStateStatus) => {
+    if (!isMergeStateAllowed(mergeStateStatus)) {
+      sendBlockedResponse(
+        res,
+        `PR merge is not cleanly mergeable (mergeStateStatus: ${mergeStateStatus ?? "unknown"}); admin-bypass merges are blocked`,
+      );
+      return;
+    }
+    next();
+  });
 }
 
 /** Express middleware gating REST `PUT .../pulls/:pull_number/merge` requests. */
