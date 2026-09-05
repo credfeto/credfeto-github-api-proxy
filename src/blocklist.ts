@@ -114,26 +114,18 @@ export function checkRestBlock(method: string, path: string): BlockResult {
   return { blocked: false };
 }
 
-// Strips leading whitespace and `#`-comment lines (valid anywhere in a
-// GraphQL document per spec) so a document like "# hi\nmutation{...}" is not
-// mistaken for a query/unrecognised operation and skipped by the operation
-// type check below.
-function stripLeadingGraphQLNoise(query: string): string {
-  let rest = query;
-  for (;;) {
-    const trimmed = rest.replace(/^\s+/, "");
-    if (!trimmed.startsWith("#")) return trimmed;
-    const newlineIndex = trimmed.indexOf("\n");
-    rest = newlineIndex === -1 ? "" : trimmed.slice(newlineIndex + 1);
-  }
-}
-
 /**
  * Extract the top-level operation names from a GraphQL request body: named
  * mutations (`mutation Foo(` or `mutation Foo {`) plus any of
  * `candidateNames` found as a field call anywhere in the document. Returns
- * an empty array for queries (they start with "query" or "{") and for any
- * body that cannot be parsed.
+ * an empty array for a document with no mutation operation at all, and for
+ * any body that cannot be parsed.
+ *
+ * A GraphQL document can define several operations (e.g. a harmless `query`
+ * alongside the real `mutation`) and select which one actually runs via a
+ * separate `operationName` field, so this scans the *whole* document for a
+ * mutation rather than only checking how it starts — otherwise a leading
+ * query operation would hide a later mutation that `operationName` selects.
  *
  * We only inspect the operation type — never execute user-supplied code.
  */
@@ -142,10 +134,8 @@ export function extractGraphQLMutationNames(body: unknown, candidateNames: Itera
   const { query } = body as Record<string, unknown>;
   if (typeof query !== "string") return [];
 
-  // Quick bail-out: if the document starts with "query" or "{" it's a read
-  const trimmed = stripLeadingGraphQLNoise(query);
-  if (trimmed.startsWith("query") || trimmed.startsWith("{")) return [];
-  if (!trimmed.startsWith("mutation")) return [];
+  // Quick bail-out: no "mutation" keyword anywhere means no mutation operation.
+  if (!/\bmutation\b/.test(query)) return [];
 
   // Extract named mutations: `mutation Foo(` or `mutation Foo {`
   const names: string[] = [];

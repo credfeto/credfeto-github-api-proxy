@@ -167,6 +167,16 @@ describe("extractGraphQLMutations", () => {
     const q = `# a comment\nquery { viewer { login } }`;
     expect(extractGraphQLMutations({ query: q })).toEqual([]);
   });
+
+  it("does not let a leading query operation hide a blocked mutation selected via operationName", () => {
+    const q = `query Noop { viewer { login } }\nmutation DoIt { createRef(input:{}) { ref { name } } }`;
+    expect(extractGraphQLMutations({ query: q, operationName: "DoIt" })).toContain("createRef");
+  });
+
+  it("returns empty for a document with no mutation operation at all, even with other operations present", () => {
+    const q = `query One { viewer { login } }\nquery Two { viewer { login } }`;
+    expect(extractGraphQLMutations({ query: q, operationName: "Two" })).toEqual([]);
+  });
 });
 
 describe("checkGraphQLBlock", () => {
