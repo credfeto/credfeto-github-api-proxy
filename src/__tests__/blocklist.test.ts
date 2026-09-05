@@ -152,6 +152,21 @@ describe("extractGraphQLMutations", () => {
     const q = `mutation { mergeBranch(input:{}) { mergeCommit { oid } } }`;
     expect(extractGraphQLMutations({ query: q })).toContain("mergeBranch");
   });
+
+  it("does not let a leading GraphQL comment hide a blocked mutation", () => {
+    const q = `# just a helpful comment\nmutation { createCommitOnBranch(input: {}) { clientMutationId } }`;
+    expect(extractGraphQLMutations({ query: q })).toContain("createCommitOnBranch");
+  });
+
+  it("does not let multiple leading comment lines hide a blocked mutation", () => {
+    const q = `# one\n  # two\n\nmutation { mergeBranch(input:{}) { mergeCommit { oid } } }`;
+    expect(extractGraphQLMutations({ query: q })).toContain("mergeBranch");
+  });
+
+  it("still returns empty for a query preceded by a leading comment", () => {
+    const q = `# a comment\nquery { viewer { login } }`;
+    expect(extractGraphQLMutations({ query: q })).toEqual([]);
+  });
 });
 
 describe("checkGraphQLBlock", () => {
