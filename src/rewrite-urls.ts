@@ -29,9 +29,23 @@ export function rewriteEmbeddedApiGithubUrls(text: string, proxyOrigin: string):
 
 const VIEWER_CAN_MERGE_AS_ADMIN_FIELD = "viewerCanMergeAsAdmin";
 
-function rewriteAndDenyAdminMergeVisitor(proxyOrigin: string): JsonVisitor {
+// A GraphQL response key is `viewerCanMergeAsAdmin` itself, or whatever alias
+// the query gave it (`x: viewerCanMergeAsAdmin`) — aliasing renames the key
+// in the response entirely, so masking by the literal field name alone would
+// let an aliased request read the true value straight through.
+function findViewerCanMergeAsAdminAliases(query: string): Set<string> {
+  const aliases = new Set<string>([VIEWER_CAN_MERGE_AS_ADMIN_FIELD]);
+  const aliasPattern = /(\w+)\s*:\s*viewerCanMergeAsAdmin\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = aliasPattern.exec(query)) !== null) {
+    aliases.add(m[1]);
+  }
+  return aliases;
+}
+
+function rewriteAndDenyAdminMergeVisitor(proxyOrigin: string, maskKeys: ReadonlySet<string>): JsonVisitor {
   return (value, key) => {
-    if (key === VIEWER_CAN_MERGE_AS_ADMIN_FIELD && value === true) {
+    if (key !== undefined && maskKeys.has(key) && value === true) {
       return [false, true];
     }
     if (typeof value !== "string") return undefined;
@@ -45,13 +59,16 @@ function rewriteAndDenyAdminMergeVisitor(proxyOrigin: string): JsonVisitor {
 // both transforms applied and a GraphQL PR response commonly carries both an
 // api.github.com URL and viewerCanMergeAsAdmin.
 //
-// isGraphQLResponse gates the viewerCanMergeAsAdmin pre-check: that field only
-// ever appears in GraphQL PR responses, so skipping the extra body scan for it
-// on REST responses (the vast majority of traffic) avoids a second full
-// Buffer.includes() pass on every response that doesn't mention api.github.com.
-export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string, isGraphQLResponse: boolean): Buffer {
+// graphQLQuery is the original request's GraphQL query text, or undefined for
+// a REST response: that field only ever appears in GraphQL PR responses, so
+// skipping the extra body scan for it on REST responses (the vast majority of
+// traffic) avoids a second full Buffer.includes() pass on every response that
+// doesn't mention api.github.com. Passing the query (rather than a plain
+// boolean) lets the mask cover any alias the query gave the field.
+export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string, graphQLQuery: string | undefined): Buffer {
   const mightRewriteUrls = body.includes(GITHUB_API_HOST);
-  const mightDenyAdminMerge = isGraphQLResponse && body.includes(VIEWER_CAN_MERGE_AS_ADMIN_FIELD);
+  const maskKeys = graphQLQuery === undefined ? undefined : findViewerCanMergeAsAdminAliases(graphQLQuery);
+  const mightDenyAdminMerge = maskKeys !== undefined && [...maskKeys].some((key) => body.includes(key));
   if (!mightRewriteUrls && !mightDenyAdminMerge) {
     return body;
   }
@@ -61,7 +78,10 @@ export function rewriteJsonResponseBody(body: Buffer, proxyOrigin: string, isGra
     return body;
   }
 
-  const [rewritten, changed] = walkJson(parsed, rewriteAndDenyAdminMergeVisitor(proxyOrigin));
+  const [rewritten, changed] = walkJson(
+    parsed,
+    rewriteAndDenyAdminMergeVisitor(proxyOrigin, maskKeys ?? new Set([VIEWER_CAN_MERGE_AS_ADMIN_FIELD])),
+  );
   if (!changed) return body;
   return Buffer.from(JSON.stringify(rewritten), "utf8");
 }
