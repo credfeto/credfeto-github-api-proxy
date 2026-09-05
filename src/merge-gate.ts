@@ -65,12 +65,39 @@ export function isGraphQLMergePullRequestMutation(body: unknown): boolean {
   return extractGraphQLMutationNames(body, ["mergePullRequest"]).includes("mergePullRequest");
 }
 
-/** Extracts `variables.input.pullRequestId` from a GraphQL request body. */
+const MERGE_PULL_REQUEST_CALL = /mergePullRequest\s*\(\s*input\s*:\s*(\$[A-Za-z_]\w*|\{[^{}]*\})/;
+
+/**
+ * Extracts the pull request id that `mergePullRequest`'s `input:` argument actually
+ * resolves to, by reading the argument bound to the call itself — never a same-named
+ * `variables.input` the call may not even reference. Trusting `variables.input` by name
+ * alone would let a caller pass an inline-literal (or differently-named variable) argument
+ * targeting the real PR while pointing this lookup at an unrelated, cleanly-mergeable decoy
+ * PR id placed under an unused `variables.input` key, so the gate would approve a PR it
+ * never actually inspected. Fails closed (returns null) for anything that cannot be
+ * resolved unambiguously, including a document with more than one `mergePullRequest(` call.
+ */
 export function extractGraphQLMergePullRequestId(body: unknown): string | null {
-  const variables = asRecord(asRecord(body)?.variables);
-  const input = asRecord(variables?.input);
-  const pullRequestId = input?.pullRequestId;
-  return typeof pullRequestId === "string" ? pullRequestId : null;
+  const record = asRecord(body);
+  const query = typeof record?.query === "string" ? record.query : undefined;
+  if (query === undefined) return null;
+
+  const calls = query.match(/mergePullRequest\s*\(/g);
+  if (calls === null || calls.length !== 1) return null;
+
+  const argMatch = MERGE_PULL_REQUEST_CALL.exec(query);
+  if (argMatch === null) return null;
+  const arg = argMatch[1];
+
+  if (arg.startsWith("$")) {
+    const variables = asRecord(record?.variables);
+    const input = asRecord(variables?.[arg.slice(1)]);
+    const pullRequestId = input?.pullRequestId;
+    return typeof pullRequestId === "string" ? pullRequestId : null;
+  }
+
+  const literalMatch = /pullRequestId\s*:\s*"([^"]+)"/.exec(arg);
+  return literalMatch !== null ? literalMatch[1] : null;
 }
 
 const MERGE_STATE_BY_NUMBER_QUERY =
