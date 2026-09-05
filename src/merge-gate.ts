@@ -30,6 +30,10 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
 }
 
+function getAuthorization(req: Request): string {
+  return req.headers.authorization as string;
+}
+
 const LOOKUP_TIMEOUT_MS = 10_000;
 
 /** Merge states a non-admin caller could merge through unassisted (matches gh's isImmediatelyMergeable). */
@@ -170,11 +174,10 @@ export function createRestMergeGate(): (req: Request, res: Response, next: NextF
       return;
     }
 
-    const authorization = req.headers.authorization as string;
     gateOnMergeState(
       MERGE_STATE_BY_NUMBER_QUERY,
       { owner: target.owner, repo: target.repo, number: target.number },
-      authorization,
+      getAuthorization(req),
       res,
       next,
     );
@@ -195,7 +198,6 @@ export function createGraphQLMergeGate(): (req: Request, res: Response, next: Ne
       return;
     }
 
-    const authorization = req.headers.authorization as string;
-    gateOnMergeState(MERGE_STATE_BY_ID_QUERY, { id: pullRequestId }, authorization, res, next);
+    gateOnMergeState(MERGE_STATE_BY_ID_QUERY, { id: pullRequestId }, getAuthorization(req), res, next);
   };
 }
