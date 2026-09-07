@@ -47,6 +47,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - Build uses esbuild to produce a single-file bundle with no node_modules in the runtime image
 - Migrated docker-compose.yml and deployment docs to support rootless Podman compose (issue #33)
 - Bump vitest from 4.1.8 to 4.1.11 and align @vitest/coverage-v8 to 4.1.11 to resolve npm peer-dependency conflict
+- Upgraded vitest and @vitest/coverage-v8 from 4.1.11 to 5.0.0 together (peer dependency requires matching major versions)
 ### Deprecated
 ### Removed
 ### Deployment Changes
