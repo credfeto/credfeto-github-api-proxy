@@ -17,3 +17,4 @@ This is an index of local instructions that apply to just this project.
 | File | Load When | Covers |
 | --- | --- | --- |
 | [gh-proxy-usage.instructions.md](gh-proxy-usage.instructions.md) | Using `gh` CLI with `GH_HOST` set to this proxy | Required `--head owner:branch` flag for `gh pr create`, background on PR creation failure |
+| [npm-dependencies.instructions.md](npm-dependencies.instructions.md) | Installing or updating `vitest` or `@vitest/coverage-v8` | Keeping the two packages at compatible, paired versions |
