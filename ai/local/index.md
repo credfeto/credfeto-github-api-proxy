@@ -17,3 +17,5 @@ This is an index of local instructions that apply to just this project.
 | File | Load When | Covers |
 | --- | --- | --- |
 | [gh-proxy-usage.instructions.md](gh-proxy-usage.instructions.md) | Using `gh` CLI with `GH_HOST` set to this proxy | Required `--head owner:branch` flag for `gh pr create`, background on PR creation failure |
+| [npm-dependencies.instructions.md](npm-dependencies.instructions.md) | Installing, updating, or reviewing (including a Dependabot PR) `vitest` or `@vitest/coverage-v8` | Keeping the two packages at compatible versions |
+| [proxy-safety.instructions.md](proxy-safety.instructions.md) | Changing this proxy's startup/credential-loading code, or any manual operational or volume-mount change | Startup-path test coverage, documenting manual/permission steps, container startup logging |
