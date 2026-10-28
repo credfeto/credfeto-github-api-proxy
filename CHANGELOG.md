@@ -49,6 +49,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - Bump vitest from 4.1.8 to 4.1.11 and align @vitest/coverage-v8 to 4.1.11 to resolve npm peer-dependency conflict
 - Upgraded vitest and @vitest/coverage-v8 from 4.1.11 to 5.0.0 together (peer dependency requires matching major versions)
 - Bump vitest from 5.0.0 to 5.0.5 and align @vitest/coverage-v8 to 5.0.5 to resolve npm peer-dependency conflict
+- Document the gh CLI local HTTP cache caveat behind stale "malformed version:" errors from gh issue list --search (issue #66)
 ### Deprecated
 ### Removed
 ### Deployment Changes
