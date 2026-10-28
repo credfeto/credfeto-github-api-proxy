@@ -159,6 +159,22 @@ add the new prefix to the `STRIP_PREFIXES` array in `src/app.ts`. The
 GraphQL endpoint (`/graphql`) is independent of this REST versioning and
 needs no rewrite.
 
+#### Stale `malformed version:` errors from gh's local HTTP cache
+
+If `gh issue list --search`, `gh pr list --search` or `gh workflow run` fails
+with a `malformed version:` error even though the proxy's `/meta` response
+includes `installed_version`, the cause is usually on the client side, not in
+the proxy.
+
+gh sends `X-GH-CACHE-TTL: 24h0m0s` on its feature-detection requests, which
+enables go-gh's on-disk HTTP cache. That cache checks only the response status
+code, not the body or any `Cache-Control` header, so a `200` `/meta` response
+captured before the proxy returned `installed_version` keeps being replayed for
+up to 24 hours. The proxy cannot defeat this from the server side.
+
+Workaround: clear gh's HTTP cache (by default `~/.cache/gh`, or the directory
+set in `$GH_CACHE_DIR`), or wait for the 24-hour TTL to expire.
+
 ---
 
 ## Architecture
