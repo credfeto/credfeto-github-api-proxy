@@ -273,6 +273,36 @@ Content-Type: application/json
   }
 }
 
+###
+
+### BLOCKED: update a pull request branch via REST (pushes commits to the PR branch)
+# Expected: 403 {"message":"Operation blocked by proxy policy",...}
+PUT {{proxyHost}}/repos/credfeto/credfeto-github-api-proxy/pulls/1/update-branch
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "expected_head_sha": "abc1234567890abcdef1234567890abcdef123456"
+}
+
+###
+
+### BLOCKED: GraphQL mutation updatePullRequestBranch (pushes commits to the PR branch)
+# Expected: 403 {"message":"Operation blocked by proxy policy",...}
+POST {{proxyHost}}/graphql
+Authorization: Bearer {{proxyToken}}
+Content-Type: application/json
+
+{
+  "query": "mutation UpdateBranch($input: UpdatePullRequestBranchInput!) { updatePullRequestBranch(input: $input) { pullRequest { id } } }",
+  "variables": {
+    "input": {
+      "pullRequestId": "PR_kwDOABCDEF",
+      "updateMethod": "REBASE"
+    }
+  }
+}
+
 ###############################################################################
 # Merge gate — R3a: PR merges are gated on mergeStateStatus
 ###############################################################################

@@ -79,6 +79,45 @@ describe("checkRestBlock — no-PR merge endpoints", () => {
   });
 });
 
+describe("checkRestBlock — pull request branch update", () => {
+  it("blocks PUT /repos/:owner/:repo/pulls/:pull_number/update-branch", () => {
+    expect(checkRestBlock("PUT", "/repos/alice/myrepo/pulls/7/update-branch")).toMatchObject({
+      blocked: true,
+      reason: expect.stringMatching(/update-branch/),
+    });
+  });
+
+  it("blocks update-branch with a trailing slash", () => {
+    expect(checkRestBlock("PUT", "/repos/alice/myrepo/pulls/7/update-branch/")).toMatchObject({ blocked: true });
+  });
+
+  it("blocks update-branch with a query string", () => {
+    expect(checkRestBlock("PUT", "/repos/alice/myrepo/pulls/7/update-branch?expected_head_sha=abc")).toMatchObject({
+      blocked: true,
+    });
+  });
+
+  it("blocks update-branch regardless of path or method case", () => {
+    expect(checkRestBlock("put", "/Repos/Alice/MyRepo/PULLS/7/Update-Branch")).toMatchObject({ blocked: true });
+  });
+
+  it("allows GET on the update-branch path (not a write)", () => {
+    expect(checkRestBlock("GET", "/repos/alice/myrepo/pulls/7/update-branch")).toMatchObject({ blocked: false });
+  });
+
+  it("allows PUT /repos/:owner/:repo/pulls/:pull_number/reviews/:id/dismissals", () => {
+    expect(checkRestBlock("PUT", "/repos/alice/myrepo/pulls/7/reviews/1/dismissals")).toMatchObject({ blocked: false });
+  });
+
+  it("allows PUT on a path that only starts with update-branch", () => {
+    expect(checkRestBlock("PUT", "/repos/alice/myrepo/pulls/7/update-branches")).toMatchObject({ blocked: false });
+  });
+
+  it("allows GET /repos/:owner/:repo/pulls/:pull_number", () => {
+    expect(checkRestBlock("GET", "/repos/alice/myrepo/pulls/7")).toMatchObject({ blocked: false });
+  });
+});
+
 describe("checkRestBlock — allowed operations", () => {
   it("allows GET /repos/:owner/:repo/issues", () => {
     expect(checkRestBlock("GET", "/repos/alice/myrepo/issues")).toMatchObject({ blocked: false });
@@ -247,5 +286,102 @@ describe("checkGraphQLBlock", () => {
   it("fails closed for a top-level array body instead of silently allowing it through (batched-request bypass)", () => {
     const body = [{ query: `mutation { mergePullRequest(input:{pullRequestId:"PR_x"}) { pullRequest { merged } } }` }];
     expect(checkGraphQLBlock(body)).toMatchObject({ blocked: true });
+  });
+});
+
+describe("checkGraphQLBlock — updatePullRequestBranch", () => {
+  const BLOCKED = { blocked: true, reason: expect.stringMatching(/updatePullRequestBranch/) };
+
+  it("blocks a plain updatePullRequestBranch mutation", () => {
+    const body = { query: `mutation { updatePullRequestBranch(input:{pullRequestId:"PR_x"}) { pullRequest { id } } }` };
+    expect(checkGraphQLBlock(body)).toMatchObject(BLOCKED);
+  });
+
+  it.each(["REBASE", "MERGE"])("blocks updatePullRequestBranch with updateMethod %s", (method) => {
+    const body = {
+      query: `mutation { updatePullRequestBranch(input:{pullRequestId:"PR_x",updateMethod:${method}}) { pullRequest { id } } }`,
+    };
+    expect(checkGraphQLBlock(body)).toMatchObject(BLOCKED);
+  });
+
+  it("blocks updatePullRequestBranch with updateMethod passed as a variable", () => {
+    const body = {
+      query: `mutation Update($input: UpdatePullRequestBranchInput!) { updatePullRequestBranch(input: $input) { pullRequest { id } } }`,
+      variables: { input: { pullRequestId: "PR_x", updateMethod: "REBASE" } },
+    };
+    expect(checkGraphQLBlock(body)).toMatchObject(BLOCKED);
+  });
+
+  it("blocks an aliased updatePullRequestBranch mutation", () => {
+    const body = { query: `mutation { harmless: updatePullRequestBranch(input:{pullRequestId:"PR_x"}) { clientMutationId } }` };
+    expect(checkGraphQLBlock(body)).toMatchObject(BLOCKED);
+  });
+
+  it("blocks updatePullRequestBranch alongside an allowed mutation in the same operation", () => {
+    const body = {
+      query: `mutation { addComment(input:{subjectId:"x",body:"hi"}) { clientMutationId } updatePullRequestBranch(input:{pullRequestId:"PR_x"}) { clientMutationId } }`,
+    };
+    expect(checkGraphQLBlock(body)).toMatchObject(BLOCKED);
+  });
+
+  it("blocks updatePullRequestBranch among several operations when operationName selects a different one", () => {
+    const body = {
+      query: `query Noop { viewer { login } }\nmutation Update { updatePullRequestBranch(input:{pullRequestId:"PR_x"}) { clientMutationId } }`,
+      operationName: "Noop",
+    };
+    expect(checkGraphQLBlock(body)).toMatchObject(BLOCKED);
+  });
+
+  it("blocks updatePullRequestBranch reached through a fragment spread", () => {
+    const body = {
+      query: `mutation { ...Sneaky }\nfragment Sneaky on Mutation { updatePullRequestBranch(input:{pullRequestId:"PR_x"}) { clientMutationId } }`,
+    };
+    expect(checkGraphQLBlock(body)).toMatchObject(BLOCKED);
+  });
+
+  it("blocks updatePullRequestBranch reached through an inline fragment", () => {
+    const body = {
+      query: `mutation { ... on Mutation { updatePullRequestBranch(input:{pullRequestId:"PR_x"}) { clientMutationId } } }`,
+    };
+    expect(checkGraphQLBlock(body)).toMatchObject(BLOCKED);
+  });
+
+  it("blocks updatePullRequestBranch disguised with comments, commas and odd whitespace", () => {
+    const body = {
+      query: `# nothing to see\n,,mutation\t\n# still nothing\n{\r\n  ,updatePullRequestBranch # comment\n  (input:{pullRequestId:"PR_x"}),{ clientMutationId } }`,
+    };
+    expect(checkGraphQLBlock(body)).toMatchObject(BLOCKED);
+  });
+
+  it("fails closed for an unparseable document containing updatePullRequestBranch", () => {
+    const body = { query: `mutation { updatePullRequestBranch(input:{pullRequestId:"PR_x"} { clientMutationId }` };
+    expect(checkGraphQLBlock(body)).toMatchObject(BLOCKED);
+  });
+
+  it("allows a query that mentions updatePullRequestBranch only in a string argument", () => {
+    const body = { query: `query { search(query:"updatePullRequestBranch", type:ISSUE, first:1) { issueCount } }` };
+    expect(checkGraphQLBlock(body)).toMatchObject({ blocked: false });
+  });
+
+  it("allows a query that mentions updatePullRequestBranch only in a comment", () => {
+    const body = { query: `# avoid updatePullRequestBranch, it pushes commits\nquery { viewer { login } }` };
+    expect(checkGraphQLBlock(body)).toMatchObject({ blocked: false });
+  });
+
+  it("allows a mutation that mentions updatePullRequestBranch only in a string argument", () => {
+    const body = {
+      query: `mutation { addComment(input:{subjectId:"x",body:"please run updatePullRequestBranch"}) { clientMutationId } }`,
+    };
+    expect(checkGraphQLBlock(body)).toMatchObject({ blocked: false });
+  });
+
+  it("allows an unrelated pull request mutation", () => {
+    const body = { query: `mutation { updatePullRequest(input:{pullRequestId:"PR_x",title:"t"}) { pullRequest { id } } }` };
+    expect(checkGraphQLBlock(body)).toMatchObject({ blocked: false });
+  });
+
+  it("allows a pull request query", () => {
+    const body = { query: `query { node(id:"PR_x") { ... on PullRequest { title mergeStateStatus } } }` };
+    expect(checkGraphQLBlock(body)).toMatchObject({ blocked: false });
   });
 });
