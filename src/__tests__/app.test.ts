@@ -75,7 +75,27 @@ describe("App integration", () => {
     expect(res.status).toBe(403);
   });
 
+  it("blocks PUT to pulls/:pull_number/update-branch", async () => {
+    const res = await request(app)
+      .put("/repos/alice/myrepo/pulls/7/update-branch")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({ expected_head_sha: "abc" });
+    expect(res.status).toBe(403);
+    expect(res.body.reason).toMatch(/update-branch/);
+  });
+
   // ── GraphQL blocklist ────────────────────────────────────────────────────
+
+  it("blocks updatePullRequestBranch GraphQL mutation", async () => {
+    const res = await request(app)
+      .post("/graphql")
+      .set("Authorization", `Bearer ${PAIR_1.proxyToken}`)
+      .send({
+        query: `mutation { updatePullRequestBranch(input:{pullRequestId:"PR_x",updateMethod:REBASE}) { clientMutationId } }`,
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.reason).toMatch(/updatePullRequestBranch/);
+  });
 
   it("blocks createCommitOnBranch GraphQL mutation", async () => {
     const res = await request(app)
