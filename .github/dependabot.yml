@@ -19,6 +19,17 @@ updates:
     versioning-strategy: increase-if-necessary
     allow:
       - dependency-type: all
+    groups:
+      vitest:
+        applies-to: version-updates
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+      vitest-security:
+        applies-to: security-updates
+        patterns:
+          - "vitest"
+          - "@vitest/*"
 
   - package-ecosystem: docker
     directory: "/"
