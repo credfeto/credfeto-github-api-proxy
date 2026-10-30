@@ -13,6 +13,12 @@
 - Do not merge any change that reduces test coverage on the startup path.
 - Run the full test suite (`npm test`) locally and confirm it passes before pushing.
 
+## Blocked Operations
+
+- The proxy refuses every operation that pushes commits or moves refs, including pull request branch updates (`PUT /repos/:owner/:repo/pulls/:pull_number/update-branch` and the `updatePullRequestBranch` GraphQL mutation). The full list is in `README.md` (R2 and R3).
+- When blocking a new operation, add the rule to `src/blocklist.ts`, tests for it in `src/__tests__/blocklist.test.ts` and `src/__tests__/app.test.ts`, a row in the `README.md` tables, and a `BLOCKED:` example in `docs/github-api-proxy.http`.
+- GraphQL mutation detection must parse the document (`src/graphql-parse.ts`) rather than pattern-match it, and must fail closed when the document cannot be parsed.
+
 ## Manual Operational Changes
 
 Any change that requires a manual step on the host (editing a file, setting a permission, creating a directory, pulling a new image) **must** be:

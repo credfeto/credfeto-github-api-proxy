@@ -43,6 +43,7 @@ All of the following return **HTTP 403** with a JSON body explaining why:
 | `GET` | `**/info/refs?service=git-receive-pack` | HTTPS git push advertisement phase |
 | `POST` | `/repos/:owner/:repo/merges` | Merges a branch directly, with no pull request or review involved |
 | `POST` | `/repos/:owner/:repo/merge-upstream` | Syncs a fork with its upstream, with no pull request or review involved |
+| `PUT` | `/repos/:owner/:repo/pulls/:pull_number/update-branch` | Merges or rebases the base branch into the pull request branch, pushing new commits to it |
 
 **Read operations on the same paths are allowed** (e.g. `GET /repos/:owner/:repo/git/commits/:sha`).
 
@@ -61,6 +62,12 @@ with no pull request/review involved, are blocked:
 | `updateRef` | Advances a branch |
 | `deleteRef` | Deletes a branch or tag |
 | `mergeBranch` | Merges a branch directly, with no pull request or review involved |
+| `updatePullRequestBranch` | Merges or rebases the base branch into a pull request branch, pushing new commits to it (any `updateMethod`) |
+
+Mutations are detected by parsing the GraphQL document, so aliases,
+fragments, comments and extra operations selected away with
+`operationName` do not hide a blocked mutation. A document the proxy cannot
+parse is refused if it contains a blocked mutation name anywhere.
 
 All **queries** are allowed. **Non-git mutations** (e.g. `createIssue`,
 `addComment`, `createPullRequest`) are allowed. `mergePullRequest` is not

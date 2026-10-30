@@ -6,12 +6,15 @@
  *    building block of every programmatic commit
  *  - Contents write API (PUT = upsert file, DELETE = delete file)
  *  - Smart-HTTP git push (git-receive-pack / info/refs?service=git-receive-pack)
+ *  - Branch merges with no pull request (merges, merge-upstream)
+ *  - Pull request branch update (update-branch), which pushes to the PR branch
  *
  * ALLOW everything else: reads of all resources, issue creation/editing,
  * PR operations, Actions reads, etc.
  */
 
 import type { Response } from "express";
+import { parseMutationRootFields } from "./graphql-parse.js";
 
 export interface BlockResult {
   blocked: boolean;
@@ -85,6 +88,14 @@ const BLOCKED_REST: Array<{ methods: string[]; pattern: RegExp; reason: string }
     pattern: /^\/repos\/[^/]+\/[^/]+\/merge-upstream(?:\/|\?|$)/i,
     reason: "merge-upstream syncs a fork with its upstream without a pull request or review",
   },
+  // --- Pull request branch update ---
+  // Merges or rebases the base branch into the PR head branch, so GitHub
+  // pushes new commits onto that branch on the caller's behalf.
+  {
+    methods: ["PUT"],
+    pattern: /^\/repos\/[^/]+\/[^/]+\/pulls\/[^/]+\/update-branch(?:\/|\?|$)/i,
+    reason: "PUT /pulls/:pull_number/update-branch merges or rebases the base branch into the pull request branch (pushes commits)",
+  },
 ];
 
 /**
@@ -100,6 +111,10 @@ const BLOCKED_GRAPHQL_MUTATIONS: ReadonlyMap<string, string> = new Map([
     (name): [string, string] => [name, `GraphQL mutation '${name}' creates or manipulates git objects`],
   ),
   ["mergeBranch", "GraphQL mutation 'mergeBranch' merges a branch directly without going through a pull request"],
+  [
+    "updatePullRequestBranch",
+    "GraphQL mutation 'updatePullRequestBranch' merges or rebases the base branch into a pull request branch (pushes commits)",
+  ],
 ]);
 
 /** Check whether a REST request should be blocked. */
@@ -115,19 +130,18 @@ export function checkRestBlock(method: string, path: string): BlockResult {
 }
 
 /**
- * Extract the top-level operation names from a GraphQL request body: named
- * mutations (`mutation Foo(` or `mutation Foo {`) plus any of
- * `candidateNames` found as a field call anywhere in the document. Returns
- * an empty array for a document with no mutation operation at all, and for
- * any body that cannot be parsed.
+ * Return which of `candidateNames` a GraphQL request body runs as a root
+ * field of any mutation operation in its document. Returns an empty array for
+ * a body with no query string or no mutation operation at all.
  *
  * A GraphQL document can define several operations (e.g. a harmless `query`
  * alongside the real `mutation`) and select which one actually runs via a
- * separate `operationName` field, so this scans the *whole* document for a
- * mutation rather than only checking how it starts — otherwise a leading
- * query operation would hide a later mutation that `operationName` selects.
+ * separate `operationName` field, so every mutation operation is inspected —
+ * otherwise a leading query operation would hide a later mutation that
+ * `operationName` selects. The document is parsed so aliases, fragments,
+ * comments and string literals cannot disguise or fake a field name.
  *
- * We only inspect the operation type — never execute user-supplied code.
+ * We only inspect the document — never execute user-supplied code.
  */
 export function extractGraphQLMutationNames(body: unknown, candidateNames: Iterable<string>): string[] {
   if (!body || typeof body !== "object") return [];
@@ -137,24 +151,14 @@ export function extractGraphQLMutationNames(body: unknown, candidateNames: Itera
   // Quick bail-out: no "mutation" keyword anywhere means no mutation operation.
   if (!/\bmutation\b/.test(query)) return [];
 
-  // Extract named mutations: `mutation Foo(` or `mutation Foo {`
-  const names: string[] = [];
-  const named = /mutation\s+(\w+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = named.exec(query)) !== null) {
-    names.push(m[1]);
+  const candidates = [...new Set(candidateNames)];
+  const rootFields = parseMutationRootFields(query);
+  if (rootFields === null) {
+    // Unparseable: fail closed on any candidate name appearing anywhere, since
+    // GitHub's parser may still accept a document this one rejects.
+    return candidates.filter((candidate) => query.includes(candidate));
   }
-
-  // Also extract the field names called inside mutation bodies
-  // e.g. `{ createCommitOnBranch(...) { ... } }`
-  // Simple heuristic: find each candidate name in the mutation string
-  for (const candidate of candidateNames) {
-    if (query.includes(candidate)) {
-      names.push(candidate);
-    }
-  }
-
-  return [...new Set(names)];
+  return candidates.filter((candidate) => rootFields.has(candidate));
 }
 
 /** Extract the top-level mutation names known to the blocklist from a GraphQL request body. */

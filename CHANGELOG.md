@@ -14,6 +14,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - Pin GitHub Actions in docker-publish.yml to commit SHA instead of mutable release tag, and enable Dependabot's github-actions ecosystem to keep the pins updated
 - Gate PR merges (REST and GraphQL) on the pull request's actual mergeability, so a proxy token backed by a repo-admin PAT can no longer bypass required reviews/status checks; hard-block the no-PR merge endpoints (merges, merge-upstream, mergeBranch); mask viewerCanMergeAsAdmin in GraphQL responses; and collapse dot-segment paths (e.g. /pulls/1/x/../merge) before routing/blocklist/gate checks so they cannot be used to reach a gated endpoint while evading the check
 - Push container images to GitHub Container Registry (ghcr.io) instead of the private registry (docker-registry.markridgwell.com / release-docker-registry.markridgwell.com) in docker-publish.yml (issue #118)
+- Block updatePullRequestBranch GraphQL mutation and PUT pulls/{n}/update-branch (#198)
 ### Added
 - Initial implementation: GitHub API proxy that blocks all git-write operations while passing through issues, PRs, and CI reads
 - Docker support via Dockerfile, docker-compose, and distroless/nodejs20 runtime image running as nonroot
