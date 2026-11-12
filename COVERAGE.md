@@ -10,7 +10,7 @@ n/a (no code)
 
 | Package | Line Coverage |
 | --- | --- |
-| **Overall (Node)** | **96.67%** |
+| **Overall (Node)** | **96.72%** |
 
 ## Python
 
@@ -22,4 +22,4 @@ excluded
 
 ---
 
-Captured at commit `5bad58d02565430d4923b11292db5c3286f60776` on 2026-10-30.
+Captured at commit `01903481daaffaa6d305a62a8f5056e985072b74` on 2026-11-12.
