@@ -228,6 +228,28 @@ cp .env.example .env
 # Edit .env and fill in PROXY_TOKEN and GITHUB_PAT
 ```
 
+#### Public URL scheme (`PUBLIC_BASE_SCHEME`)
+
+The proxy rewrites every `https://api.github.com` URL in response bodies and
+headers (for example `jobs_url` fields and `Link` pagination headers) to point
+back at itself, so the scheme it uses must be the one clients actually reach it
+on. The proxy itself only speaks plain HTTP; when clients connect over HTTPS,
+TLS must be terminated by a reverse proxy (nginx, caddy, etc.) in front of it.
+
+| `PUBLIC_BASE_SCHEME` | Scheme used for rewritten URLs |
+| --- | --- |
+| unset or empty | The scheme from the `X-Forwarded-Proto` header, trusted only when the connection comes from a loopback, link-local or private (unique-local) address; `http` otherwise or when the header is absent |
+| `http` | Always `http`; `X-Forwarded-Proto` is ignored |
+| `https` | Always `https`; `X-Forwarded-Proto` is ignored |
+
+Any other value (including upper-case `HTTPS`) stops the proxy at startup with
+`Invalid PUBLIC_BASE_SCHEME`.
+
+Set `PUBLIC_BASE_SCHEME=https` when the TLS-terminating reverse proxy connects
+from a public address, or does not send `X-Forwarded-Proto`. Otherwise make
+sure the reverse proxy sets `X-Forwarded-Proto` (nginx:
+`proxy_set_header X-Forwarded-Proto $scheme;`; caddy sets it by default).
+
 ### Run
 
 ```sh
@@ -349,7 +371,11 @@ sets `CREDENTIALS_FILE` so the proxy reads tokens from it; no `PROXY_TOKEN` or
 - Run the proxy on localhost or a private network — it is not hardened for
   public internet exposure (no rate limiting, no TLS termination built-in).
 - If you expose it externally, put it behind a TLS-terminating reverse proxy
-  (nginx, caddy, etc.).
+  (nginx, caddy, etc.), and make sure rewritten URLs use `https` as described
+  in [Public URL scheme](#public-url-scheme-public_base_scheme).
+- `X-Forwarded-Proto` is only trusted from loopback, link-local and private
+  addresses, so a client connecting directly from a public address cannot
+  choose the scheme of the URLs the proxy hands back.
 - The GraphQL inspection is pattern-matching, not a full GraphQL parser. It
   covers all known GitHub git-write mutations. If GitHub adds new git-write
   mutations in future, the blocklist in `src/blocklist.ts` must be updated.

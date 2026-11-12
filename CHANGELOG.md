@@ -43,6 +43,7 @@ Please ADD ALL Changes to the UNRELEASED SECTION and not a specific release
 - gh CLI 'workflow run' and '--search'-backed listings failing through the proxy with 'malformed version:' (issue #47)
 - Replace unnamed wildcard catch-all route with named wildcard syntax required by Express 5 / path-to-regexp 8
 - Root path (GET /) now forwards to GitHub instead of 404ing, fixing gh auth login and gh auth status against the proxy
+- Rewritten proxy URLs now use the correct public scheme behind a TLS-terminating reverse proxy: trust proxy for private ranges so X-Forwarded-Proto is honoured, plus optional PUBLIC_BASE_SCHEME override (#107)
 ### Changed
 - Updated GitHub Actions to Node.js 24 compatible versions: actions/checkout@v6.0.3, docker/setup-buildx-action@v4.1.0, docker/build-push-action@v7.2.0
 - Build uses esbuild to produce a single-file bundle with no node_modules in the runtime image

@@ -427,6 +427,109 @@ describe("createApp CACHE_TTL_SECONDS validation", () => {
   });
 });
 
+// ── PUBLIC_BASE_SCHEME / trust proxy ──────────────────────────────────────────
+
+describe("createApp PUBLIC_BASE_SCHEME and trust proxy", () => {
+  const original = process.env.PUBLIC_BASE_SCHEME;
+  const mockForward = vi.mocked(forwardToGitHub);
+
+  beforeEach(() => {
+    mockForward.mockClear();
+  });
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.PUBLIC_BASE_SCHEME;
+    } else {
+      process.env.PUBLIC_BASE_SCHEME = original;
+    }
+  });
+
+  it.each(["ftp", "HTTPS", "https://", " https"])("throws when PUBLIC_BASE_SCHEME is %j", (value) => {
+    process.env.PUBLIC_BASE_SCHEME = value;
+    expect(() => createApp(CREDENTIALS)).toThrow("Invalid PUBLIC_BASE_SCHEME");
+  });
+
+  it.each(["http", "https"] as const)("passes PUBLIC_BASE_SCHEME=%s to the forwarder", async (scheme) => {
+    process.env.PUBLIC_BASE_SCHEME = scheme;
+    const app = createApp(CREDENTIALS);
+
+    await request(app).get("/repos/alice/myrepo/issues").set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
+
+    expect(mockForward).toHaveBeenCalledOnce();
+    expect(mockForward.mock.calls[0][3]).toBe(scheme);
+  });
+
+  it("leaves trust proxy disabled when PUBLIC_BASE_SCHEME is set", () => {
+    process.env.PUBLIC_BASE_SCHEME = "https";
+    const app = createApp(CREDENTIALS);
+
+    expect(app.get("trust proxy fn")("127.0.0.1", 0)).toBe(false);
+  });
+
+  it.each(["", undefined])("treats PUBLIC_BASE_SCHEME=%j as unset", async (value) => {
+    if (value === undefined) {
+      delete process.env.PUBLIC_BASE_SCHEME;
+    } else {
+      process.env.PUBLIC_BASE_SCHEME = value;
+    }
+    const app = createApp(CREDENTIALS);
+
+    await request(app).get("/repos/alice/myrepo/issues").set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
+
+    expect(mockForward.mock.calls[0][3]).toBeUndefined();
+  });
+
+  // req.protocol is a getter that reads the live socket's remote address, so it must be
+  // captured while the request is in flight rather than after the connection closes.
+  async function protocolSeenByForwarder(forwardedProto?: string): Promise<string> {
+    let protocol = "";
+    mockForward.mockImplementationOnce((req, res) => {
+      protocol = req.protocol;
+      res.status(200).json({ proxied: true });
+    });
+    const app = createApp(CREDENTIALS);
+    const pending = request(app).get("/repos/alice/myrepo/issues").set("Authorization", `Bearer ${PAIR_1.proxyToken}`);
+    await (forwardedProto === undefined ? pending : pending.set("X-Forwarded-Proto", forwardedProto));
+    return protocol;
+  }
+
+  it("honours X-Forwarded-Proto: https from a trusted loopback hop when PUBLIC_BASE_SCHEME is unset", async () => {
+    delete process.env.PUBLIC_BASE_SCHEME;
+
+    expect(await protocolSeenByForwarder("https")).toBe("https");
+  });
+
+  it("falls back to http when no X-Forwarded-Proto header is sent", async () => {
+    delete process.env.PUBLIC_BASE_SCHEME;
+
+    expect(await protocolSeenByForwarder()).toBe("http");
+  });
+
+  it("ignores X-Forwarded-Proto when PUBLIC_BASE_SCHEME is set", async () => {
+    process.env.PUBLIC_BASE_SCHEME = "http";
+
+    expect(await protocolSeenByForwarder("https")).toBe("http");
+  });
+
+  it.each(["127.0.0.1", "::1", "169.254.1.1", "10.0.0.5", "172.16.0.5", "192.168.1.5", "fc00::1", "fe80::1"])(
+    "trusts forwarded headers from private hop %s",
+    (address) => {
+      delete process.env.PUBLIC_BASE_SCHEME;
+      const app = createApp(CREDENTIALS);
+
+      expect(app.get("trust proxy fn")(address, 0)).toBe(true);
+    },
+  );
+
+  it.each(["203.0.113.5", "8.8.8.8", "2001:db8::1"])("does not trust forwarded headers from public client %s", (address) => {
+    delete process.env.PUBLIC_BASE_SCHEME;
+    const app = createApp(CREDENTIALS);
+
+    expect(app.get("trust proxy fn")(address, 0)).toBe(false);
+  });
+});
+
 // ── createPullRequest headRepositoryId transform ──────────────────────────────
 
 const CREATE_PR_MUTATION = `mutation CreatePullRequest($input: CreatePullRequestInput!) {

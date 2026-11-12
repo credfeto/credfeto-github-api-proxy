@@ -996,6 +996,49 @@ describe("forwardToGitHub: api.github.com URL rewriting", () => {
     expect(parsed.url).toBe("http://localhost:8080/notifications/threads/1");
   });
 
+  it("uses an explicit public scheme over the request's protocol for the body and Link header", async () => {
+    const req = makeRequest({ url: "/repos/alice/myrepo/actions/runs/1", protocol: "http", host: "localhost:8080" });
+    const res = makeResponse();
+    mockUpstream({
+      statusCode: 200,
+      headers: { link: '<https://api.github.com/repos/alice/myrepo/actions/runs?page=2>; rel="next"' },
+      body: '{"jobs_url":"https://api.github.com/repos/alice/myrepo/actions/runs/1/jobs"}',
+    });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, undefined, "https");
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as { jobs_url: string };
+    expect(parsed.jobs_url).toBe("https://localhost:8080/repos/alice/myrepo/actions/runs/1/jobs");
+    expect(capturedResponseHeaders(res)?.link).toBe(
+      '<https://localhost:8080/repos/alice/myrepo/actions/runs?page=2>; rel="next"',
+    );
+  });
+
+  it("uses an explicit http public scheme even when the request protocol is https", async () => {
+    const req = makeRequest({ url: "/notifications", protocol: "https", host: "localhost:8080" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, body: '{"url":"https://api.github.com/notifications/threads/1"}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response, undefined, "http");
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as { url: string };
+    expect(parsed.url).toBe("http://localhost:8080/notifications/threads/1");
+  });
+
+  it("falls back to http when a trusted hop forwards a protocol other than http or https", async () => {
+    const req = makeRequest({ url: "/notifications", protocol: "javascript", host: "localhost:8080" });
+    const res = makeResponse();
+    mockUpstream({ statusCode: 200, body: '{"url":"https://api.github.com/notifications/threads/1"}' });
+    const done = awaitEnd(res);
+    forwardToGitHub(req, res as unknown as Response);
+    await done;
+
+    const parsed = JSON.parse(res._body!.toString("utf8")) as { url: string };
+    expect(parsed.url).toBe("http://localhost:8080/notifications/threads/1");
+  });
+
   it("preserves the upstream Content-Length on a HEAD response instead of buffering it as empty", async () => {
     const req = makeRequest({ method: "HEAD", url: "/repos/alice/myrepo/issues" });
     const res = makeResponse();
