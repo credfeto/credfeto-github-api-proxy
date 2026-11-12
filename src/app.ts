@@ -3,7 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import { createAuthMiddleware, type CredentialPair } from "./auth.js";
 import { checkRestBlock, checkGraphQLBlock, sendBlockedResponse } from "./blocklist.js";
 import { createRestMergeGate, createGraphQLMergeGate } from "./merge-gate.js";
-import { forwardToGitHub } from "./proxy.js";
+import { forwardToGitHub, type PublicScheme } from "./proxy.js";
 import { transformCreatePullRequest } from "./transform.js";
 import { ResponseCache } from "./cache.js";
 import { InMemoryETagStore, InMemoryResponseCache } from "./cache-store.js";
@@ -16,8 +16,27 @@ function extractGraphQLOp(req: Request): string | null {
   return match[2] !== undefined ? `${match[1]}:${match[2]}` : match[1];
 }
 
+const TRUSTED_PROXY_ADDRESSES = "loopback, linklocal, uniquelocal";
+
+function parsePublicBaseScheme(value: string | undefined): PublicScheme | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (value === "http" || value === "https") return value;
+  throw new Error(`Invalid PUBLIC_BASE_SCHEME: "${value}" (expected "http" or "https")`);
+}
+
 export function createApp(credentials: CredentialPair[]): express.Application {
   const app = express();
+
+  // TLS is normally terminated by a reverse proxy in front of this server, so the socket
+  // is always plain http. Without an explicit scheme, honour X-Forwarded-Proto, but only
+  // from private-network hops so an arbitrary client cannot choose the rewrite scheme.
+  const publicBaseScheme = parsePublicBaseScheme(process.env.PUBLIC_BASE_SCHEME);
+  if (publicBaseScheme === undefined) {
+    app.set("trust proxy", TRUSTED_PROXY_ADDRESSES);
+    console.log(`PUBLIC_BASE_SCHEME not set; trusting X-Forwarded-Proto from ${TRUSTED_PROXY_ADDRESSES} addresses`);
+  } else {
+    console.log(`PUBLIC_BASE_SCHEME=${publicBaseScheme}; rewriting response URLs with this scheme`);
+  }
 
   const rawTtl = parseInt(process.env.CACHE_TTL_SECONDS ?? "60", 10);
   if (!Number.isFinite(rawTtl) || rawTtl < 1 || rawTtl > 86_400) {
@@ -151,7 +170,7 @@ export function createApp(credentials: CredentialPair[]): express.Application {
   // bare root path "/" (e.g. GET /api/v3/ stripped to "/", which gh's token
   // scope check hits on every `gh auth login`/`gh auth status`). An unbraced
   // `/*splat` requires at least one path segment and would 404 on root.
-  app.all("/{*splat}", (req: Request, res: Response) => { forwardToGitHub(req, res, responseCache); });
+  app.all("/{*splat}", (req: Request, res: Response) => { forwardToGitHub(req, res, responseCache, publicBaseScheme); });
 
   return app;
 }

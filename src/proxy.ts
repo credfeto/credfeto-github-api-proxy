@@ -72,7 +72,14 @@ function logUpstream5xx(details: {
  *  2. Cleanly handle body parsing for JSON (needed for GraphQL inspection)
  *  3. Intercept responses to implement ETag / short-TTL caching
  */
-export function forwardToGitHub(req: Request, res: Response, responseCache?: ResponseCache): void {
+export type PublicScheme = "http" | "https";
+
+export function forwardToGitHub(
+  req: Request,
+  res: Response,
+  responseCache?: ResponseCache,
+  publicScheme?: PublicScheme,
+): void {
   const targetHost =
     req.path.startsWith("/uploads") ? GITHUB_UPLOADS_HOST : GITHUB_API_HOST;
 
@@ -93,7 +100,9 @@ export function forwardToGitHub(req: Request, res: Response, responseCache?: Res
 
   // Everything that points back to api.github.com must be rewritten to point back at
   // the proxy, so clients following a URL from a response never bypass it.
-  const proxyOrigin = `${req.protocol}://${requestHost}`;
+  // A trusted hop can forward any X-Forwarded-Proto value, so only http/https are honoured.
+  const scheme: PublicScheme = publicScheme ?? (req.protocol === "https" ? "https" : "http");
+  const proxyOrigin = `${scheme}://${requestHost}`;
   const rewriteProxyHeaders = (h: http.IncomingHttpHeaders): Record<string, string | string[] | undefined> =>
     rewriteResponseHeaders(h as Record<string, string | string[] | undefined>, proxyOrigin);
 
