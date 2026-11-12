@@ -64,6 +64,8 @@ function logUpstream5xx(details: {
   );
 }
 
+export type PublicScheme = "http" | "https";
+
 /**
  * Forward the incoming request to GitHub and pipe the response back.
  *
@@ -72,8 +74,6 @@ function logUpstream5xx(details: {
  *  2. Cleanly handle body parsing for JSON (needed for GraphQL inspection)
  *  3. Intercept responses to implement ETag / short-TTL caching
  */
-export type PublicScheme = "http" | "https";
-
 export function forwardToGitHub(
   req: Request,
   res: Response,
